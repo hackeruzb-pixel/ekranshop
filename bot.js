@@ -733,7 +733,7 @@ Narxi: ${money(item.price * item.qty)}
 
         await bot.sendMessage(
             user.id,
-            `✅ Buyurtmangiz qabul qilindi!!!\n🆔 #${orderId}\n💰 ${money(total)}`
+            `✅ Buyurtmangiz qabul qilindi!\n🆔 #${orderId}\n💰 ${money(total)}`
         ).catch(() => {});
 
         res.json({
@@ -792,29 +792,18 @@ bot.onText(/\/start/, msg => {
         keyboard.unshift([{
             text: "🔐 Admin boshqaruv",
             web_app: {
-                url: "https://ekranshop1.onrender.com/admin.html"
+                url: "https://ekranshop.onrender.com/admin.html"
             }
         }]);
     }
 
     bot.sendMessage(
         msg.chat.id,
-        `👋 <b>Assalomu alaykum, ${escapeHTML(firstName)}!</b>
+        `Assalomu alaykum, ${msg.from.first_name}!
 
-📱 <b>EKRAN SHOP</b> rasmiy botiga xush kelibsiz!
+📱 EKRAN SHOP do'koniga xush kelibsiz!
 
-✨ Bizda telefoningiz uchun:
-• 📲 Sifatli displeylar
-• 🔧 Telefon ehtiyot qismlari
-• 💎 Hamyonbop narxlar
-• 🚚 Qulay buyurtma berish
-
-🛍 Mahsulotlarni ko‘rish va buyurtma berish uchun quyidagi tugmani bosing.
-
-💬 Savollaringiz bo‘lsa, admin bilan bog‘lanishingiz mumkin.
-
-❤️ <b>EKRAN SHOP — sifat va ishonch!</b>
-`,
+Original va kopiya displeylarni tanlang va buyurtma bering.`,
         {
             reply_markup: {
                 keyboard: keyboard,
