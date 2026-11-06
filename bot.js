@@ -772,6 +772,31 @@ app.use((error, req, res, next) => {
 
 // BOT
 bot.onText(/\/start/, msg => {
+
+    const isAdmin = String(msg.from.id) === String(ADMIN_ID);
+
+    const keyboard = [
+        [{
+            text: "🛍 Do'konni ochish",
+            web_app: {
+                url: WEB_APP_URL
+            }
+        }],
+        [{
+            text: "📞 Admin bilan bog'lanish"
+        }]
+    ];
+
+    // Faqat admin uchun
+    if (isAdmin) {
+        keyboard.unshift([{
+            text: "🔐 Admin boshqaruv",
+            web_app: {
+                url: "https://ekranshop.onrender.com/admin.html"
+            }
+        }]);
+    }
+
     bot.sendMessage(
         msg.chat.id,
         `Assalomu alaykum, ${msg.from.first_name}!
@@ -781,15 +806,7 @@ bot.onText(/\/start/, msg => {
 Original va kopiya displeylarni tanlang va buyurtma bering.`,
         {
             reply_markup: {
-                keyboard: [
-                    [{
-                        text: "🛍 Do'konni ochish",
-                        web_app: { url: WEB_APP_URL }
-                    }],
-                    [{
-                        text: "📞 Admin bilan bog'lanish"
-                    }]
-                ],
+                keyboard: keyboard,
                 resize_keyboard: true
             }
         }
@@ -797,12 +814,14 @@ Original va kopiya displeylarni tanlang va buyurtma bering.`,
 });
 
 bot.on("message", msg => {
+
     if (msg.text === "📞 Admin bilan bog'lanish") {
         bot.sendMessage(
             msg.chat.id,
             "Admin bilan bog'lanish uchun @ADMIN_USERNAME"
         );
     }
+
 });
 
 
