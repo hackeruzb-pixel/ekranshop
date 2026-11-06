@@ -272,8 +272,10 @@ app.post("/api/admin/login", (req, res) => {
     });
 });
 // ADMIN HOLATI
-app.get("/api/admin/me", adminOnly, (req, res) => {
-    res.json({ success: true });
+app.get("/api/admin/me", (req, res) => {
+    res.json({
+        isAdmin: req.session?.isAdmin === true
+    });
 });
 
 // ADMIN LOGOUT

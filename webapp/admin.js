@@ -140,12 +140,18 @@ function showAdmin() {
 
 async function checkAdmin() {
     try {
-        await api("/api/admin/me");
+        const data = await api("/api/admin/me");
+
+        if (data.isAdmin !== true) {
+            showLogin();
+            return;
+        }
 
         showAdmin();
         await loadAll();
 
-    } catch {
+    } catch (error) {
+        console.error("ADMIN CHECK:", error);
         showLogin();
     }
 }
