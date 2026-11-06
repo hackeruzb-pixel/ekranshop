@@ -44,36 +44,43 @@ const $ = id => document.getElementById(id);
 // ===============================
 
 async function checkAdminAccess() {
+    isAdmin = false;
+    adminCheckComplete = false;
+
+    document.body.classList.remove("is-admin");
+
     try {
-        const response = await fetch(
-            `${API_URL}/api/admin/me`,
-            {
-                credentials: "same-origin",
-                cache: "no-store"
-            }
-        );
+        const response = await fetch("/api/admin/me", {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store"
+        });
+
+        if (!response.ok) {
+            throw new Error("Admin sessiyasi mavjud emas");
+        }
 
         const data = await response.json();
 
-        isAdmin = response.ok && data.isAdmin === true;
+        isAdmin = data.isAdmin === true;
 
     } catch (error) {
-        console.error("Admin tekshirish xatosi:", error);
+        console.error("Admin tekshirish:", error);
         isAdmin = false;
+    } finally {
+        adminCheckComplete = true;
+
+        document.body.classList.toggle("is-admin", isAdmin);
+
+        if (!isAdmin) {
+            cart = [];
+            closeCart();
+        }
+
+        updateCart();
+        renderProducts();
     }
-
-    adminCheckComplete = true;
-
-    document.body.classList.toggle("is-admin", isAdmin);
-
-    // Oddiy foydalanuvchida savatcha bo'lmaydi
-    if (!isAdmin) {
-        cart = [];
-    }
-
-    updateCart();
 }
-
 // ===============================
 // PUL FORMATI
 // ===============================
@@ -857,13 +864,12 @@ function goHome() {
 // SAHIFA QAYTA OCHILGANDA YANGILASH
 // ===============================
 
-document.addEventListener("visibilitychange", () => {
+document.addEventListener("visibilitychange", async () => {
     if (!document.hidden) {
-        loadProducts();
-        checkAdminAccess();
+        await checkAdminAccess();
+        await loadProducts();
     }
 });
-
 // ===============================
 // ISHGA TUSHIRISH
 // ===============================
