@@ -818,7 +818,7 @@ bot.on("message", msg => {
     if (msg.text === "📞 Admin bilan bog'lanish") {
         bot.sendMessage(
             msg.chat.id,
-            "Admin bilan bog'lanish uchun @premium_ekran"
+            `Admin bilan bog'lanish uchun @premium_ekran <br/> @premium_ekran1`
         );
     }
 

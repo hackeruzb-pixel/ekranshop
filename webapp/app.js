@@ -23,8 +23,8 @@ if (tg) {
 // SOZLAMALAR
 // ===============================
 
-const ADMIN_USERNAME = "@code4jannah";
-const API_URL = "";
+const ADMIN_USERNAME = "@premium_ekran";
+const API_URL = WEB_APP_URL;
 
 let products = [];
 let cart = [];
