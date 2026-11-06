@@ -733,7 +733,7 @@ Narxi: ${money(item.price * item.qty)}
 
         await bot.sendMessage(
             user.id,
-            `✅ Buyurtmangiz qabul qilindi!\n🆔 #${orderId}\n💰 ${money(total)}`
+            `✅ Buyurtmangiz qabul qilindi!!!\n🆔 #${orderId}\n💰 ${money(total)}`
         ).catch(() => {});
 
         res.json({
@@ -792,7 +792,7 @@ bot.onText(/\/start/, msg => {
         keyboard.unshift([{
             text: "🔐 Admin boshqaruv",
             web_app: {
-                url: "https://ekranshop.onrender.com/admin.html"
+                url: "https://ekranshop1.onrender.com/admin.html"
             }
         }]);
     }
