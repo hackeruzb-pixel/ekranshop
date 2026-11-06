@@ -611,24 +611,24 @@ app.post("/api/orders", async (req, res) => {
             });
         }
 
-        const { items, name, phone, note } = req.body;
+   const { items, name, phone, note } = req.body;
 
-        if (
-            !Array.isArray(items) ||
-            items.length === 0 ||
-            items.length > 30 ||
-            typeof name !== "string" ||
-            name.trim().length < 2 ||
-            name.length > 100 ||
-            typeof phone !== "string" ||
-            !/^[+0-9()\-\s]{7,20}$/.test(phone) ||
-            (note && (typeof note !== "string" || note.length > 500))
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Buyurtma ma'lumotlari noto'g'ri."
-            });
-        }
+if (
+    !Array.isArray(items) ||
+    items.length === 0 ||
+    items.length > 30 ||
+    typeof name !== "string" ||
+    name.trim().length < 2 ||
+    name.length > 100 ||
+    typeof phone !== "string" ||
+    (phone.trim() !== "" && !/^[+0-9()\-\s]{7,20}$/.test(phone)) ||
+    (note && (typeof note !== "string" || note.length > 500))
+) {
+    return res.status(400).json({
+        success: false,
+        message: "Buyurtma ma'lumotlari noto'g'ri."
+    });
+}
 
         const products = getProducts();
         const orderItems = [];

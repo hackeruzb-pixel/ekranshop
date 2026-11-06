@@ -24,7 +24,7 @@ if (tg) {
 // ===============================
 
 const ADMIN_USERNAME = "@premium_ekran";
-const API_URL = WEB_APP_URL;
+const API_URL = "";
 
 let products = [];
 let cart = [];
