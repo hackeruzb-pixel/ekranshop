@@ -1,0 +1,298 @@
+
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f8ff">
+
+    <title>EKRAN SHOP | Admin</title>
+
+    <link rel="stylesheet" href="admin.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+<div id="loginScreen" class="login-screen">
+    <form id="loginForm" class="login-card">
+        <div class="login-logo">E</div>
+
+        <h1>EKRAN SHOP</h1>
+        <p>Admin boshqaruv paneli</p>
+
+        <label>Admin paroli</label>
+
+        <input
+            id="adminPassword"
+            type="password"
+            placeholder="Parolingizni kiriting"
+            required
+            autocomplete="current-password"
+        >
+
+        <button class="btn-primary" type="submit">
+            Tizimga kirish →
+        </button>
+
+        <div id="loginError" class="error"></div>
+    </form>
+</div>
+
+<div id="adminApp" class="admin-app hidden">
+
+    <aside class="sidebar">
+        <div class="side-logo">
+            <div class="login-logo">E</div>
+            <div>
+                <h2>EKRAN SHOP</h2>
+                <p>ADMIN PANEL</p>
+            </div>
+        </div>
+
+        <nav>
+            <button class="side-link active" data-page="dashboard">
+                <span>▦</span> Bosh sahifa
+            </button>
+
+            <button class="side-link" data-page="products">
+                <span>📱</span> Mahsulotlar
+            </button>
+
+            <button class="side-link" data-page="orders">
+                <span>🛍</span> Buyurtmalar
+            </button>
+        </nav>
+
+        <button id="logoutBtn" class="logout-btn">
+            ↪ Chiqish
+        </button>
+    </aside>
+
+    <main class="main-content">
+
+        <header class="topbar">
+            <div>
+                <h1 id="pageTitle">Bosh sahifa</h1>
+                <p>EKRAN SHOP boshqaruv tizimi</p>
+            </div>
+
+            <span class="admin-badge">ADMIN</span>
+        </header>
+
+        <!-- DASHBOARD -->
+        <section id="dashboardPage" class="page">
+
+            <div class="stats-grid">
+
+                <div class="stat-card">
+                    <span>📱</span>
+                    <p>Jami mahsulotlar</p>
+                    <h2 id="statProducts">0</h2>
+                </div>
+
+                <div class="stat-card">
+                    <span>📦</span>
+                    <p>Ombordagi displeylar</p>
+                    <h2 id="statStock">0</h2>
+                </div>
+
+                <div class="stat-card">
+                    <span>🛍</span>
+                    <p>Buyurtmalar</p>
+                    <h2 id="statOrders">0</h2>
+                </div>
+
+                <div class="stat-card">
+                    <span>💰</span>
+                    <p>Buyurtmalar summasi</p>
+                    <h2 id="statRevenue">0</h2>
+                </div>
+
+            </div>
+
+            <div class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h2>So‘nggi mahsulotlar</h2>
+                        <p>Do‘konga qo‘shilgan mahsulotlar</p>
+                    </div>
+
+                    <button class="btn-primary" onclick="showPage('products')">
+                        Mahsulotlarni ko‘rish →
+                    </button>
+                </div>
+
+                <div id="dashboardProducts" class="product-list"></div>
+            </div>
+
+        </section>
+
+        <!-- PRODUCTS -->
+        <section id="productsPage" class="page hidden">
+
+            <div class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h2>Mahsulotlar</h2>
+                        <p>Displeylarni boshqarish</p>
+                    </div>
+
+                    <button class="btn-primary" onclick="openProductForm()">
+                        + Displey qo‘shish
+                    </button>
+                </div>
+
+                <div class="toolbar">
+                    <input
+                        id="adminSearch"
+                        type="search"
+                        placeholder="Model yoki brend qidirish..."
+                    >
+
+                    <select id="adminFilter">
+                        <option value="all">Barchasi</option>
+                        <option value="original">Original</option>
+                        <option value="copy">Kopiya</option>
+                    </select>
+                </div>
+
+                <div id="adminProducts" class="product-list"></div>
+            </div>
+
+        </section>
+
+        <!-- ORDERS -->
+        <section id="ordersPage" class="page hidden">
+
+            <div class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h2>Buyurtmalar</h2>
+                        <p>Kelgan buyurtmalar tarixi</p>
+                    </div>
+
+                    <button class="btn-secondary" onclick="loadOrders()">
+                        ↻ Yangilash
+                    </button>
+                </div>
+
+                <div id="adminOrders"></div>
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
+<!-- PRODUCT FORM MODAL -->
+<div class="modal" id="productModal">
+
+    <div class="form-modal">
+
+        <div class="modal-heading">
+            <div>
+                <h2 id="formTitle">Yangi displey qo‘shish</h2>
+                <p>Mahsulot ma’lumotlarini kiriting</p>
+            </div>
+
+            <button class="close-btn" onclick="closeProductForm()">✕</button>
+        </div>
+
+        <form id="productForm" enctype="multipart/form-data">
+
+            <input type="hidden" id="editId">
+
+            <div class="form-grid">
+
+                <div class="field">
+                    <label>Mahsulot nomi *</label>
+                    <input id="pName" required maxlength="100" placeholder="iPhone 11">
+                </div>
+
+                <div class="field">
+                    <label>Brend *</label>
+                    <select id="pBrand" required>
+                        <option value="Apple">Apple</option>
+                        <option value="Samsung">Samsung</option>
+                        <option value="Xiaomi">Xiaomi</option>
+                        <option value="Poco">Poco</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label>Model *</label>
+                    <input id="pModel" required placeholder="iPhone 11">
+                </div>
+
+                <div class="field">
+                    <label>Displey turi *</label>
+                    <select id="pType" required>
+                        <option value="original">Original</option>
+                        <option value="copy">Kopiya</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label>Narxi (so‘m) *</label>
+                    <input id="pPrice" type="number" min="1" step="1" required placeholder="350000">
+                </div>
+
+                <div class="field">
+                    <label>Eski narxi (ixtiyoriy)</label>
+                    <input id="pOldPrice" type="number" min="0" step="1" value="0">
+                </div>
+
+                <div class="field">
+                    <label>Ombordagi soni *</label>
+                    <input id="pStock" type="number" min="0" step="1" required value="1">
+                </div>
+
+               
+
+                <div class="field full">
+                    <label>Mahsulot rasmi *</label>
+                    <input
+                        id="pImage"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                    >
+
+                    <small>JPG, PNG yoki WEBP. Maksimal 5 MB.</small>
+
+                    <img id="imagePreview" class="image-preview hidden" alt="Rasm ko‘rinishi">
+                </div>
+
+                <div class="field full">
+                    <label>Mahsulot haqida</label>
+                    <textarea id="pDescription" maxlength="1000" placeholder="Displey haqida ma'lumot..."></textarea>
+                </div>
+
+            </div>
+
+            <div class="form-actions">
+                <button type="button" class="btn-secondary" onclick="closeProductForm()">
+                    Bekor qilish
+                </button>
+
+                <button type="submit" class="btn-primary" id="saveProductBtn">
+                    Saqlash
+                </button>
+            </div>
+
+            <div id="formError" class="error"></div>
+
+        </form>
+
+    </div>
+
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="admin.js"></script>
+
+</body>
+</html>

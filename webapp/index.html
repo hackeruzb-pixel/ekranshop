@@ -1,0 +1,370 @@
+
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    >
+
+    <meta name="theme-color" content="#111111">
+    <meta name="description" content="EKRAN SHOP — telefon displeylari onlayn do‘koni">
+
+    <title>EKRAN SHOP — Displeylar do‘koni</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet"
+    >
+
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Telegram Mini App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const tg = window.Telegram?.WebApp;
+
+            if (tg) {
+                tg.ready();
+                tg.expand();
+
+                try {
+                    if (tg.isVersionAtLeast("6.1")) {
+                        tg.setHeaderColor("#111111");
+                        tg.setBackgroundColor("#111111");
+                    }
+                } catch (error) {
+                    console.warn("Telegram sozlamasi:", error);
+                }
+            }
+        });
+    </script>
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- HEADER -->
+    <header class="header">
+
+        <div class="logo">
+            <div class="logo-icon">E</div>
+
+            <div class="logo-text">
+                <h2>EKRAN <span>SHOP</span></h2>
+                <p>Displeylar do‘koni</p>
+            </div>
+        </div>
+
+        <button
+            class="cart-header"
+            type="button"
+            onclick="openCart()"
+            aria-label="Savatchani ochish"
+        >
+            <span>🛒</span>
+            <b id="cartCount">0</b>
+        </button>
+
+    </header>
+
+
+    <!-- HERO -->
+    <section class="hero">
+
+        <div class="hero-content">
+
+            <span class="hero-label">
+                📱 ONLINE DO‘KON
+            </span>
+
+            <h1>
+                Telefoningiz uchun
+                <span>eng yaxshi displeylar!</span>
+            </h1>
+
+            <p>
+                Original va sifatli kopiya displeylar.
+                Qulay narxlar va tezkor buyurtma.
+            </p>
+
+           
+
+        </div>
+
+        <div class="hero-circle">
+            📱
+        </div>
+
+    </section>
+
+
+    <!-- SEARCH -->
+    <section class="search-section">
+
+        <div class="search-box">
+
+            <span>🔎</span>
+
+            <input
+                type="search"
+                id="searchInput"
+                placeholder="Telefon modelini qidiring..."
+                autocomplete="off"
+            >
+
+            <button
+                id="clearSearch"
+                type="button"
+                onclick="clearSearch()"
+                aria-label="Qidiruvni tozalash"
+            >
+                ✕
+            </button>
+
+        </div>
+
+    </section>
+
+
+    <!-- FILTER -->
+    <section class="filter-section">
+
+        <div class="section-heading">
+            <div>
+                <h3>Displey turi</h3>
+                <p>Kerakli turdagi displeyni tanlang</p>
+            </div>
+        </div>
+
+        <div class="filter-list">
+
+            <button
+                class="filter active"
+                type="button"
+                data-type="all"
+            >
+                Hammasi
+            </button>
+
+            <button
+                class="filter"
+                type="button"
+                data-type="original"
+            >
+                Original
+            </button>
+
+            <button
+                class="filter"
+                type="button"
+                data-type="copy"
+            >
+                Kopiya
+            </button>
+
+        </div>
+
+    </section>
+
+
+    <!-- PRODUCTS -->
+    <main id="catalog">
+
+        <div class="products-heading">
+
+            <div>
+                <h3>Bizning mahsulotlar</h3>
+
+                <p id="productCount">
+                    Mahsulotlar yuklanmoqda...
+                </p>
+            </div>
+
+            <span class="products-icon">✦</span>
+
+        </div>
+
+
+        <div id="products" class="products-grid">
+
+            <div class="loading">
+                Mahsulotlar yuklanmoqda...
+            </div>
+
+        </div>
+
+    </main>
+
+
+    <!-- CART BAR -->
+    <div id="cartBar" class="cart-bar hidden">
+
+        <div class="cart-bar-info">
+
+            <span id="barCount">
+                0 ta mahsulot
+            </span>
+
+            <strong id="barTotal">
+                0 so‘m
+            </strong>
+
+        </div>
+
+        <button
+            type="button"
+            onclick="openCart()"
+        >
+            Savatchaga o‘tish →
+        </button>
+
+    </div>
+
+
+    <!-- CART MODAL -->
+    <div class="modal" id="cartModal">
+
+        <div class="modal-content">
+
+            <div class="modal-header">
+
+                <h2>🛒 Savatcha</h2>
+
+                <button
+                    type="button"
+                    onclick="closeCart()"
+                    aria-label="Yopish"
+                >
+                    ✕
+                </button>
+
+            </div>
+
+
+            <!-- CART ITEMS -->
+            <div id="cartItems">
+
+                <div class="empty">
+                    🛒 Savatchangiz hozircha bo‘sh
+                </div>
+
+            </div>
+
+
+            <!-- TOTAL -->
+            <div class="cart-total">
+
+                <span>Jami summa</span>
+
+                <strong id="cartTotal">
+                    0 so‘m
+                </strong>
+
+            </div>
+
+
+            <!-- CHECKOUT -->
+            <button
+                class="primary-btn checkout-btn"
+                type="button"
+                onclick="openCheckout()"
+            >
+                Buyurtma berish →
+            </button>
+
+            <p class="checkout-note">
+                Buyurtmangiz server orqali tekshiriladi va tasdiqlanadi.
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <!-- SUCCESS MODAL -->
+    <div class="modal" id="successModal">
+
+        <div class="modal-content success-content">
+
+            <div class="success-icon">
+                ✓
+            </div>
+
+            <span class="success-label">
+                MUVAFFAQIYATLI
+            </span>
+
+            <h2>
+                Buyurtma muvaffaqiyatli berildi!
+            </h2>
+
+            <p id="successText">
+                Buyurtmangiz qabul qilindi.
+            </p>
+
+            <div class="success-info">
+                <span>EKRAN SHOP</span>
+                <small>Bizni tanlaganingiz uchun rahmat!</small>
+            </div>
+
+            <button
+                class="primary-btn"
+                type="button"
+                onclick="closeSuccess()"
+            >
+                Davom etish
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- BOTTOM NAVIGATION -->
+    <nav class="bottom-nav">
+
+        <button
+            class="nav-item active"
+            type="button"
+            onclick="goHome()"
+        >
+            <span>⌂</span>
+            <small>Do‘kon</small>
+        </button>
+
+        <button
+            class="nav-item"
+            type="button"
+            onclick="openCart()"
+        >
+            <span>🛒</span>
+            <small>Savatcha</small>
+        </button>
+
+        <button
+            class="nav-item"
+            type="button"
+            onclick="contactAdmin()"
+        >
+            <span>☎</span>
+            <small>Aloqa</small>
+        </button>
+
+    </nav>
+
+</div>
+
+
+<!-- APP JAVASCRIPT -->
+<script src="app.js"></script>
+
+</body>
+</html>

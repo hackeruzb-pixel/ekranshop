@@ -1,0 +1,17 @@
+{
+  "name": "ekran-dokon",
+  "version": "2.0.0",
+  "description": "Telegram displeylar do'koni va admin panel",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node --watch bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.22.3",
+    "express-session": "^1.19.0",
+    "multer": "^2.5.0",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
