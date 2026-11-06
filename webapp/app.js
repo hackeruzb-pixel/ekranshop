@@ -34,8 +34,45 @@ let selectedType = "all";
 let searchQuery = "";
 
 let isOrdering = false;
+let isAdmin = false;
+let adminCheckComplete = false;
 
 const $ = id => document.getElementById(id);
+
+// ===============================
+// ADMIN TEKSHIRISH
+// ===============================
+
+async function checkAdminAccess() {
+    try {
+        const response = await fetch(
+            `${API_URL}/api/admin/me`,
+            {
+                credentials: "same-origin",
+                cache: "no-store"
+            }
+        );
+
+        const data = await response.json();
+
+        isAdmin = response.ok && data.isAdmin === true;
+
+    } catch (error) {
+        console.error("Admin tekshirish xatosi:", error);
+        isAdmin = false;
+    }
+
+    adminCheckComplete = true;
+
+    document.body.classList.toggle("is-admin", isAdmin);
+
+    // Oddiy foydalanuvchida savatcha bo'lmaydi
+    if (!isAdmin) {
+        cart = [];
+    }
+
+    updateCart();
+}
 
 // ===============================
 // PUL FORMATI
@@ -157,10 +194,13 @@ async function loadProducts() {
                 '<div class="empty">Mahsulotlar yuklanmoqda...</div>';
         }
 
-        const response = await fetch(`${API_URL}/api/products`, {
-            method: "GET",
-            cache: "no-store"
-        });
+        const response = await fetch(
+            `${API_URL}/api/products`,
+            {
+                method: "GET",
+                cache: "no-store"
+            }
+        );
 
         if (!response.ok) {
             throw new Error("Mahsulotlarni yuklab bo‘lmadi");
@@ -179,27 +219,27 @@ async function loadProducts() {
             stock: Number(product.stock || 0)
         }));
 
-        // Omborda qolmagan mahsulotlarni savatchadan chiqarish
-        cart = cart.filter(item => {
-            const product = products.find(p =>
-                sameId(p.id, item.id)
-            );
+        if (isAdmin) {
+            cart = cart.filter(item => {
+                const product = products.find(p =>
+                    sameId(p.id, item.id)
+                );
 
-            return product && product.stock > 0;
-        });
+                return product && product.stock > 0;
+            });
 
-        // Qoldiqdan ortiq miqdorni kamaytirish
-        cart.forEach(item => {
-            const product = products.find(p =>
-                sameId(p.id, item.id)
-            );
+            cart.forEach(item => {
+                const product = products.find(p =>
+                    sameId(p.id, item.id)
+                );
 
-            if (product && item.qty > product.stock) {
-                item.qty = product.stock;
-            }
-        });
+                if (product && item.qty > product.stock) {
+                    item.qty = product.stock;
+                }
+            });
 
-        cart = cart.filter(item => item.qty > 0);
+            cart = cart.filter(item => item.qty > 0);
+        }
 
         renderProducts();
         updateCart();
@@ -266,7 +306,6 @@ function renderProducts() {
             <article class="product-card">
 
                 <div class="product-image">
-
                     <img
                         src="${escapeHTML(image)}"
                         alt="${escapeHTML(product.name)}"
@@ -281,7 +320,6 @@ function renderProducts() {
                             "Displey"
                         )}
                     </span>
-
                 </div>
 
                 <div class="product-info">
@@ -318,16 +356,21 @@ function renderProducts() {
                         }
                     </p>
 
-                    <button
-                        class="add-btn"
-                        onclick="addToCart('${escapeHTML(product.id)}')"
-                        ${available ? "" : "disabled"}
-                    >
-                        ${available ? "+ Savatchaga" : "Tugagan"}
-                    </button>
+                    ${
+                        isAdmin
+                        ? `
+                            <button
+                                class="add-btn"
+                                onclick="addToCart('${escapeHTML(product.id)}')"
+                                ${available ? "" : "disabled"}
+                            >
+                                ${available ? "+ Savatchaga" : "Tugagan"}
+                            </button>
+                        `
+                        : ""
+                    }
 
                 </div>
-
             </article>
         `;
     }).join("");
@@ -395,6 +438,11 @@ document.querySelectorAll(".filter").forEach(button => {
 // ===============================
 
 function addToCart(id) {
+    if (!adminCheckComplete || !isAdmin) {
+        notify("Savatchadan faqat admin foydalanishi mumkin", "error");
+        return;
+    }
+
     const product = products.find(p =>
         sameId(p.id, id)
     );
@@ -437,6 +485,8 @@ function addToCart(id) {
 // ===============================
 
 function getTotal() {
+    if (!isAdmin) return 0;
+
     return cart.reduce((sum, item) => {
         const product = products.find(p =>
             sameId(p.id, item.id)
@@ -453,6 +503,8 @@ function getTotal() {
 // ===============================
 
 function getCount() {
+    if (!isAdmin) return 0;
+
     return cart.reduce(
         (sum, item) => sum + item.qty,
         0
@@ -472,8 +524,7 @@ function updateCart() {
     }
 
     if ($("barCount")) {
-        $("barCount").textContent =
-            count + " ta mahsulot";
+        $("barCount").textContent = count + " ta mahsulot";
     }
 
     if ($("barTotal")) {
@@ -487,9 +538,11 @@ function updateCart() {
     if ($("cartBar")) {
         $("cartBar").classList.toggle(
             "hidden",
-            count === 0
+            !isAdmin || count === 0
         );
     }
+
+    document.body.classList.toggle("is-admin", isAdmin);
 
     renderCart();
 }
@@ -502,6 +555,12 @@ function renderCart() {
     const container = $("cartItems");
 
     if (!container) return;
+
+    if (!isAdmin) {
+        container.innerHTML =
+            '<div class="empty">Savatchadan faqat admin foydalanadi</div>';
+        return;
+    }
 
     if (cart.length === 0) {
         container.innerHTML =
@@ -558,6 +617,8 @@ function renderCart() {
 // ===============================
 
 function changeQty(id, change) {
+    if (!isAdmin) return;
+
     const item = cart.find(p =>
         sameId(p.id, id)
     );
@@ -594,6 +655,8 @@ function changeQty(id, change) {
 // ===============================
 
 function openCart() {
+    if (!adminCheckComplete || !isAdmin) return;
+
     if (!$("cartModal")) return;
 
     $("cartModal").classList.add("show");
@@ -609,6 +672,11 @@ function closeCart() {
 // ===============================
 
 async function openCheckout() {
+    if (!adminCheckComplete || !isAdmin) {
+        notify("Buyurtma berish faqat admin uchun", "error");
+        return;
+    }
+
     if (!cart.length) {
         notify("Savatchangiz bo‘sh", "error");
         return;
@@ -616,43 +684,30 @@ async function openCheckout() {
 
     if (isOrdering) return;
 
-    // Telegram sessiyasini tekshirish
     if (!tg || !tg.initData) {
-        console.error("Telegram initData mavjud emas:", {
-            telegramExists: !!tg,
-            user: tg?.initDataUnsafe?.user,
-            platform: tg?.platform
-        });
-
         notify(
             "Telegram sessiyasi topilmadi. Mini App havolasini tekshiring.",
             "error"
         );
-
         return;
     }
 
     isOrdering = true;
 
-    const orderButton = document.querySelector(
-        ".checkout-btn"
-    );
+    const orderButton = document.querySelector(".checkout-btn");
 
     const originalText =
         orderButton?.textContent || "Buyurtma berish";
 
     if (orderButton) {
         orderButton.disabled = true;
-        orderButton.textContent =
-            "⏳ Buyurtma yuborilmoqda...";
+        orderButton.textContent = "⏳ Buyurtma yuborilmoqda...";
     }
 
     const user = tg.initDataUnsafe?.user;
 
     const name = user
-        ? [user.first_name, user.last_name]
-            .filter(Boolean)
-            .join(" ")
+        ? [user.first_name, user.last_name].filter(Boolean).join(" ")
         : "Telegram foydalanuvchisi";
 
     const orderItems = cart.map(item => ({
@@ -672,13 +727,10 @@ async function openCheckout() {
             `${API_URL}/api/orders`,
             {
                 method: "POST",
-
                 headers: {
                     "Content-Type": "application/json"
                 },
-
                 signal: controller.signal,
-
                 body: JSON.stringify({
                     initData: tg.initData,
                     name,
@@ -698,14 +750,11 @@ async function openCheckout() {
             );
         }
 
-        // Faqat server tasdiqlagandan keyin
-        // savatchani tozalash
         cart = [];
 
         updateCart();
         closeCart();
 
-        // Muvaffaqiyat oynasi
         if ($("successText")) {
             $("successText").textContent =
                 `Buyurtma #${result.orderId} muvaffaqiyatli qabul qilindi. Jami: ${money(result.total)}`;
@@ -713,31 +762,20 @@ async function openCheckout() {
 
         $("successModal")?.classList.add("show");
 
-        notify(
-            "Buyurtmangiz muvaffaqiyatli berildi!",
-            "success"
-        );
-
+        notify("Buyurtmangiz muvaffaqiyatli berildi!", "success");
         successHaptic();
 
-        // Ombordagi yangi qoldiqni yuklash
         await loadProducts();
 
     } catch (error) {
         console.error("Buyurtma xatosi:", error);
 
-        if (error.name === "AbortError") {
-            notify(
-                "Server javob bermadi. Buyurtma holatini tekshiring.",
-                "error"
-            );
-        } else {
-            notify(
-                error.message ||
-                "Buyurtma yuborilmadi. Qayta urinib ko‘ring.",
-                "error"
-            );
-        }
+        notify(
+            error.name === "AbortError"
+                ? "Server javob bermadi. Buyurtma holatini tekshiring."
+                : error.message || "Buyurtma yuborilmadi.",
+            "error"
+        );
 
     } finally {
         clearTimeout(timeout);
@@ -765,7 +803,6 @@ function closeSuccess() {
 
 function contactAdmin() {
     const username = ADMIN_USERNAME.replace("@", "");
-
     const url = `https://t.me/${username}`;
 
     if (tg?.openTelegramLink) {
@@ -820,18 +857,21 @@ function goHome() {
 // SAHIFA QAYTA OCHILGANDA YANGILASH
 // ===============================
 
-document.addEventListener(
-    "visibilitychange",
-    () => {
-        if (!document.hidden) {
-            loadProducts();
-        }
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+        loadProducts();
+        checkAdminAccess();
     }
-);
+});
 
 // ===============================
 // ISHGA TUSHIRISH
 // ===============================
 
-loadProducts();
-updateCart();
+async function initShop() {
+    await checkAdminAccess();
+    await loadProducts();
+    updateCart();
+}
+
+initShop();

@@ -1,6 +1,15 @@
 
+"use strict";
+
+/* =========================================
+   EKRAN SHOP — ADMIN PANEL
+========================================= */
+
 let adminProducts = [];
 let adminOrders = [];
+
+let isLoading = false;
+let previewObjectURL = null;
 
 const $ = id => document.getElementById(id);
 
@@ -17,62 +26,149 @@ function escapeHTML(value) {
     })[char]);
 }
 
-// API
-async function api(url, options = {}) {
-    const response = await fetch(url, {
-        credentials: "same-origin",
-        ...options
-    });
+function safeNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
 
-    const data = await response.json().catch(() => ({}));
+function formatDate(value) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return "Sana mavjud emas";
+    }
+
+    return date.toLocaleString("uz-UZ");
+}
+
+/* =========================================
+   TOAST
+========================================= */
+
+function toast(message) {
+    let element = $("toast");
+
+    if (!element) {
+        element = document.createElement("div");
+        element.id = "toast";
+        element.className = "toast";
+        document.body.appendChild(element);
+    }
+
+    element.textContent = message;
+    element.classList.add("show");
+
+    clearTimeout(element._timer);
+
+    element._timer = setTimeout(() => {
+        element.classList.remove("show");
+    }, 2800);
+}
+
+/* =========================================
+   API
+========================================= */
+
+async function api(url, options = {}) {
+    let response;
+
+    try {
+        response = await fetch(url, {
+            credentials: "same-origin",
+            cache: "no-store",
+            ...options
+        });
+    } catch (error) {
+        console.error("FETCH ERROR:", error);
+        throw new Error("Server bilan aloqa yo‘q.");
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+
+    let data;
+
+    if (contentType.includes("application/json")) {
+        data = await response.json().catch(() => ({}));
+    } else {
+        data = {
+            message: await response.text().catch(() => "")
+        };
+    }
+
+    console.log("API:", url);
+    console.log("STATUS:", response.status);
+    console.log("RESPONSE:", data);
 
     if (!response.ok) {
-        if (response.status === 401) showLogin();
-        throw new Error(data.message || "Server xatosi");
+        if (response.status === 401) {
+            console.error("ADMIN SESSION YO‘Q!");
+        }
+
+        throw new Error(
+            data.message ||
+            data.error ||
+            `Server xatosi: ${response.status}`
+        );
     }
 
     return data;
 }
 
-// TOAST
-function toast(message) {
-    const element = $("toast");
-    if (!element) return;
+/* =========================================
+   RESPONSE ARRAY
+========================================= */
 
-    element.textContent = message;
-    element.classList.add("show");
-
-    setTimeout(() => element.classList.remove("show"), 2500);
+function getArray(data, key) {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.[key])) return data[key];
+    return [];
 }
 
-// LOGIN
+/* =========================================
+   LOGIN / ADMIN
+========================================= */
+
 function showLogin() {
-    $("loginScreen").classList.remove("hidden");
-    $("adminApp").classList.add("hidden");
+    $("loginScreen")?.classList.remove("hidden");
+    $("adminApp")?.classList.add("hidden");
 }
 
 function showAdmin() {
-    $("loginScreen").classList.add("hidden");
-    $("adminApp").classList.remove("hidden");
+    $("loginScreen")?.classList.add("hidden");
+    $("adminApp")?.classList.remove("hidden");
 }
 
-// ADMIN TEKSHIRISH
 async function checkAdmin() {
     try {
         await api("/api/admin/me");
+
         showAdmin();
         await loadAll();
+
     } catch {
         showLogin();
     }
 }
 
-// LOGIN
-$("loginForm").addEventListener("submit", async event => {
+/* =========================================
+   LOGIN FORM
+========================================= */
+
+$("loginForm")?.addEventListener("submit", async event => {
     event.preventDefault();
 
-    const password = $("adminPassword").value;
-    const button = event.submitter;
+    const passwordInput = $("adminPassword");
+    const button = event.submitter ||
+        $("loginForm").querySelector('[type="submit"]');
+
+    if (!passwordInput || !button) return;
+
+    const password = passwordInput.value.trim();
+
+    if (!password) {
+        $("loginError").textContent = "Parolni kiriting.";
+        return;
+    }
 
     button.disabled = true;
     button.textContent = "Tekshirilmoqda...";
@@ -82,11 +178,13 @@ $("loginForm").addEventListener("submit", async event => {
     try {
         await api("/api/admin/login", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json"
+            },
             body: JSON.stringify({ password })
         });
 
-        $("adminPassword").value = "";
+        passwordInput.value = "";
 
         showAdmin();
         await loadAll();
@@ -101,27 +199,50 @@ $("loginForm").addEventListener("submit", async event => {
     }
 });
 
-// LOGOUT
-$("logoutBtn").addEventListener("click", async () => {
+/* =========================================
+   LOGOUT
+========================================= */
+
+$("logoutBtn")?.addEventListener("click", async () => {
+    const button = $("logoutBtn");
+
+    if (button) button.disabled = true;
+
     try {
-        await api("/api/admin/logout", { method: "POST" });
+        await api("/api/admin/logout", {
+            method: "POST"
+        });
+
+        adminProducts = [];
+        adminOrders = [];
+
         showLogin();
-        toast("Tizimdan chiqildi");
+        toast("Tizimdan chiqildi.");
+
     } catch (error) {
         toast(error.message);
+    } finally {
+        if (button) button.disabled = false;
     }
 });
 
-// MA'LUMOTLARNI YUKLASH
+/* =========================================
+   LOAD ALL
+========================================= */
+
 async function loadAll() {
+    if (isLoading) return;
+
+    isLoading = true;
+
     try {
-        const [products, orders] = await Promise.all([
+        const [productsData, ordersData] = await Promise.all([
             api("/api/admin/products"),
             api("/api/admin/orders")
         ]);
 
-        adminProducts = products;
-        adminOrders = orders;
+        adminProducts = getArray(productsData, "products");
+        adminOrders = getArray(ordersData, "orders");
 
         renderDashboard();
         renderAdminProducts();
@@ -129,17 +250,31 @@ async function loadAll() {
 
     } catch (error) {
         toast(error.message);
+    } finally {
+        isLoading = false;
     }
 }
 
-// SAHIFALAR
+/* =========================================
+   PAGE NAVIGATION
+========================================= */
+
 function showPage(page) {
-    const pages = ["dashboard", "products", "orders"];
+    const pages = [
+        "dashboard",
+        "products",
+        "orders"
+    ];
 
     if (!pages.includes(page)) return;
 
     pages.forEach(name => {
-        $(name + "Page").classList.toggle("hidden", name !== page);
+        const element = $(name + "Page");
+
+        element?.classList.toggle(
+            "hidden",
+            name !== page
+        );
     });
 
     document.querySelectorAll(".side-link").forEach(button => {
@@ -155,9 +290,17 @@ function showPage(page) {
         orders: "Buyurtmalar"
     };
 
-    $("pageTitle").textContent = titles[page];
+    if ($("pageTitle")) {
+        $("pageTitle").textContent = titles[page];
+    }
 
-    if (page === "orders") loadOrders();
+    if (page === "orders") {
+        loadOrders();
+    }
+
+    if (page === "products") {
+        renderAdminProducts();
+    }
 }
 
 document.querySelectorAll(".side-link").forEach(button => {
@@ -166,201 +309,397 @@ document.querySelectorAll(".side-link").forEach(button => {
     });
 });
 
-// DASHBOARD
+/* =========================================
+   DASHBOARD
+========================================= */
+
 function renderDashboard() {
-    $("statProducts").textContent = adminProducts.length;
+    if ($("statProducts")) {
+        $("statProducts").textContent = adminProducts.length;
+    }
 
-    const stock = adminProducts.reduce(
-        (sum, product) => sum + Number(product.stock || 0), 0
-    );
+    const stock = adminProducts.reduce((sum, product) => {
+        return sum + Math.max(0, safeNumber(product.stock));
+    }, 0);
 
-    $("statStock").textContent = stock;
-    $("statOrders").textContent = adminOrders.length;
+    if ($("statStock")) {
+        $("statStock").textContent = stock;
+    }
+
+    if ($("statOrders")) {
+        $("statOrders").textContent = adminOrders.length;
+    }
 
     const revenue = adminOrders
         .filter(order => order.status !== "Bekor qilindi")
-        .reduce((sum, order) => sum + Number(order.total || 0), 0);
+        .reduce((sum, order) => {
+            return sum + safeNumber(order.total);
+        }, 0);
 
-    $("statRevenue").textContent = money(revenue);
+    if ($("statRevenue")) {
+        $("statRevenue").textContent = money(revenue);
+    }
 
     const latest = adminProducts.slice(-5).reverse();
 
-    $("dashboardProducts").innerHTML = latest.length
-        ? latest.map(productHTML).join("")
-        : '<div class="empty">Hozircha displey yo‘q</div>';
+    if ($("dashboardProducts")) {
+        $("dashboardProducts").innerHTML = latest.length
+            ? latest.map(productHTML).join("")
+            : '<div class="empty">Hozircha displey yo‘q</div>';
+    }
 }
 
-// MAHSULOT HTML
+/* =========================================
+   PRODUCT HTML
+========================================= */
+
 function productHTML(product) {
+    const id = escapeHTML(product.id);
+    const image = escapeHTML(product.image || "");
+    const name = escapeHTML(product.name || "Nomsiz mahsulot");
+    const model = escapeHTML(product.model || "");
+    const type = escapeHTML(
+        product.typeName || product.type || ""
+    );
+
+    const stock = Math.max(0, safeNumber(product.stock));
+    const price = money(product.price);
+
     return `
         <div class="admin-product">
 
             <img
-                src="${escapeHTML(product.image)}"
-                alt="${escapeHTML(product.name)}"
+                src="${image}"
+                alt="${name}"
+                loading="lazy"
                 onerror="this.style.visibility='hidden'"
             >
 
             <div class="admin-product-info">
-                <h3>${escapeHTML(product.name)}</h3>
+                <h3>${name}</h3>
 
                 <p>
-                    ${escapeHTML(product.model)}
-                    · ${escapeHTML(product.typeName)}
-                    · ${Number(product.stock)} dona
+                    ${model}
+                    · ${type}
+                    · ${stock} dona
                 </p>
 
-                <strong>${money(product.price)}</strong>
+                <strong>${price}</strong>
             </div>
 
             <div class="product-actions">
-                <button class="edit-btn"
-                    onclick="editProduct(${product.id})">
+
+                <button
+                    class="edit-btn"
+                    type="button"
+                    data-action="edit"
+                    data-id="${id}">
                     ✎ Tahrirlash
                 </button>
 
-                <button class="delete-btn"
-                    onclick="deleteProduct(${product.id})">
+                <button
+                    class="delete-btn"
+                    type="button"
+                    data-action="delete"
+                    data-id="${id}">
                     🗑 O‘chirish
                 </button>
+
             </div>
 
         </div>
     `;
 }
 
-// MAHSULOTLAR
+/* =========================================
+   PRODUCT LIST
+========================================= */
+
 function renderAdminProducts() {
-    const search = $("adminSearch").value.toLowerCase();
+    const container = $("adminProducts");
+
+    if (!container) return;
+
+    const search = ($("adminSearch")?.value || "")
+        .trim()
+        .toLowerCase();
 
     const filtered = adminProducts.filter(product => {
-        const text = `
-            ${product.name}
-            ${product.brand}
-            ${product.model}
-        `.toLowerCase();
+        const text = [
+            product.name,
+            product.brand,
+            product.model,
+            product.type,
+            product.typeName
+        ].join(" ").toLowerCase();
 
         return text.includes(search);
     });
 
-    $("adminProducts").innerHTML = filtered.length
+    container.innerHTML = filtered.length
         ? filtered.map(productHTML).join("")
         : '<div class="empty">Displey topilmadi</div>';
 }
 
-$("adminSearch").addEventListener("input", renderAdminProducts);
+$("adminSearch")?.addEventListener("input", renderAdminProducts);
 
-// FORM OCHISH
-function openProductForm() {
-    $("productForm").reset();
+/* =========================================
+   PRODUCT ACTIONS
+========================================= */
 
-    $("editId").value = "";
-    $("pOldPrice").value = 0;
-    $("pStock").value = 1;
+$("adminProducts")?.addEventListener("click", event => {
+    const button = event.target.closest("[data-action]");
 
-    $("formTitle").textContent = "Yangi displey qo‘shish";
-    $("saveProductBtn").textContent = "Mahsulotni saqlash";
+    if (!button) return;
 
-    $("imagePreview").classList.add("hidden");
-    $("imagePreview").removeAttribute("src");
+    const id = button.dataset.id;
+    const action = button.dataset.action;
 
-    $("formError").textContent = "";
-    $("productModal").classList.add("show");
+    if (action === "edit") {
+        editProduct(id);
+    }
+
+    if (action === "delete") {
+        deleteProduct(id);
+    }
+});
+
+$("dashboardProducts")?.addEventListener("click", event => {
+    const button = event.target.closest("[data-action]");
+
+    if (!button) return;
+
+    if (button.dataset.action === "edit") {
+        editProduct(button.dataset.id);
+    }
+
+    if (button.dataset.action === "delete") {
+        deleteProduct(button.dataset.id);
+    }
+});
+
+/* =========================================
+   IMAGE PREVIEW
+========================================= */
+
+function clearImagePreview() {
+    if (previewObjectURL) {
+        URL.revokeObjectURL(previewObjectURL);
+        previewObjectURL = null;
+    }
+
+    const preview = $("imagePreview");
+
+    if (preview) {
+        preview.classList.add("hidden");
+        preview.removeAttribute("src");
+    }
 }
 
-// FORM YOPISH
-function closeProductForm() {
-    $("productModal").classList.remove("show");
-}
-
-// RASM PREVIEW
-$("pImage").addEventListener("change", () => {
-    const file = $("pImage").files[0];
+$("pImage")?.addEventListener("change", () => {
+    const file = $("pImage").files?.[0];
 
     if (!file) return;
 
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-        $("formError").textContent = "JPG, PNG yoki WEBP rasm tanlang.";
+    const allowedTypes = [
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+        $("formError").textContent =
+            "JPG, PNG yoki WEBP rasm tanlang.";
+
         $("pImage").value = "";
         return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-        $("formError").textContent = "Rasm 5 MB dan oshmasin.";
+        $("formError").textContent =
+            "Rasm hajmi 5 MB dan oshmasin.";
+
         $("pImage").value = "";
         return;
     }
 
     $("formError").textContent = "";
 
-    $("imagePreview").src = URL.createObjectURL(file);
+    clearImagePreview();
+
+    previewObjectURL = URL.createObjectURL(file);
+
+    $("imagePreview").src = previewObjectURL;
     $("imagePreview").classList.remove("hidden");
 });
 
-// TAHRIRLASH
-function editProduct(id) {
-    const product = adminProducts.find(p => String(p.id) === String(id));
+/* =========================================
+   OPEN PRODUCT FORM
+========================================= */
 
-    if (!product) return;
+function openProductForm() {
+    $("productForm")?.reset();
 
-    $("editId").value = product.id;
-    $("pName").value = product.name;
-    $("pBrand").value = product.brand;
-    $("pModel").value = product.model;
-    $("pType").value = product.type;
-    $("pPrice").value = product.price;
-    $("pOldPrice").value = product.oldPrice || 0;
-    $("pStock").value = product.stock;
-    $("pDescription").value = product.description || "";
+    if ($("editId")) $("editId").value = "";
+    if ($("pOldPrice")) $("pOldPrice").value = 0;
+    if ($("pStock")) $("pStock").value = 1;
 
-    $("pImage").value = "";
+    if ($("formTitle")) {
+        $("formTitle").textContent = "Yangi displey qo‘shish";
+    }
 
-    $("imagePreview").src = product.image;
-    $("imagePreview").classList.remove("hidden");
+    if ($("saveProductBtn")) {
+        $("saveProductBtn").textContent = "Mahsulotni saqlash";
+    }
 
-    $("formTitle").textContent = "Displeyni tahrirlash";
-    $("saveProductBtn").textContent = "O‘zgarishlarni saqlash";
+    clearImagePreview();
 
-    $("formError").textContent = "";
-    $("productModal").classList.add("show");
+    if ($("formError")) {
+        $("formError").textContent = "";
+    }
+
+    $("productModal")?.classList.add("show");
 }
 
-// SAQLASH
-$("productForm").addEventListener("submit", async event => {
+function closeProductForm() {
+    $("productModal")?.classList.remove("show");
+    clearImagePreview();
+}
+
+/* =========================================
+   EDIT PRODUCT
+========================================= */
+function editProduct(id) {
+    const product = adminProducts.find(
+        p => String(p.id) === String(id)
+    );
+
+    if (!product) {
+        alert("Mahsulot topilmadi!");
+        return;
+    }
+
+    const fields = {
+        editId: product.id,
+        pName: product.name,
+        pBrand: product.brand,
+        pModel: product.model,
+        pType: product.type,
+        pCategory: product.category || "iphone",
+        pPrice: product.price,
+        pOldPrice: product.oldPrice || 0,
+        pStock: product.stock ?? 0,
+        pDescription: product.description || ""
+    };
+
+    Object.entries(fields).forEach(([id, value]) => {
+        const element = $(id);
+        if (element) element.value = value ?? "";
+    });
+
+    if ($("pImage")) {
+        $("pImage").value = "";
+    }
+
+    clearImagePreview();
+
+    if (product.image && $("imagePreview")) {
+        $("imagePreview").src = product.image;
+        $("imagePreview").classList.remove("hidden");
+    }
+
+    if ($("formTitle")) {
+        $("formTitle").textContent = "Displeyni tahrirlash";
+    }
+
+    if ($("saveProductBtn")) {
+        $("saveProductBtn").textContent = "O‘zgarishlarni saqlash";
+    }
+
+    if ($("formError")) {
+        $("formError").textContent = "";
+    }
+
+    $("productModal")?.classList.add("show");
+}
+/* =========================================
+   SAVE PRODUCT
+========================================= */
+
+$("productForm")?.addEventListener("submit", async event => {
     event.preventDefault();
 
-    const id = $("editId").value;
-    const image = $("pImage").files[0];
+    const id = $("editId")?.value || "";
+    const image = $("pImage")?.files?.[0];
+
+    const name = $("pName")?.value.trim();
+    const brand = $("pBrand")?.value.trim();
+    const model = $("pModel")?.value.trim();
+    const price = Number($("pPrice")?.value);
+    const oldPrice = Number($("pOldPrice")?.value || 0);
+    const stock = Number($("pStock")?.value);
+
+    if (!name || !brand || !model) {
+        $("formError").textContent =
+            "Mahsulot nomi, brendi va modelini kiriting.";
+        return;
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+        $("formError").textContent =
+            "Mahsulot narxini to‘g‘ri kiriting.";
+        return;
+    }
+
+    if (!Number.isFinite(oldPrice) || oldPrice < 0) {
+        $("formError").textContent =
+            "Eski narxni to‘g‘ri kiriting.";
+        return;
+    }
+
+    if (!Number.isInteger(stock) || stock < 0) {
+        $("formError").textContent =
+            "Ombordagi son 0 yoki undan katta butun son bo‘lishi kerak.";
+        return;
+    }
 
     if (!id && !image) {
-        $("formError").textContent = "Yangi mahsulot uchun rasm yuklang.";
+        $("formError").textContent =
+            "Yangi mahsulot uchun rasm yuklang.";
         return;
     }
 
     const formData = new FormData();
+formData.append("category", $("pCategory")?.value || "iphone");
+    formData.append("name", name);
+    formData.append("brand", brand);
+    formData.append("model", model);
+    formData.append("type", $("pType")?.value || "");
+    formData.append("price", String(price));
+    formData.append("oldPrice", String(oldPrice));
+    formData.append("stock", String(stock));
+    formData.append(
+        "description",
+        $("pDescription")?.value.trim() || ""
+    );
 
-    formData.append("name", $("pName").value.trim());
-    formData.append("brand", $("pBrand").value.trim());
-    formData.append("model", $("pModel").value.trim());
-    formData.append("type", $("pType").value);
-    formData.append("price", $("pPrice").value);
-    formData.append("oldPrice", $("pOldPrice").value || "0");
-    formData.append("stock", $("pStock").value);
-    formData.append("description", $("pDescription").value);
-
-    if (image) formData.append("image", image);
+    if (image) {
+        formData.append("image", image);
+    }
 
     const button = $("saveProductBtn");
 
-    button.disabled = true;
-    button.textContent = "Saqlanmoqda...";
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Saqlanmoqda...";
+    }
 
     $("formError").textContent = "";
 
     try {
         await api(
             id
-                ? `/api/admin/products/${id}`
+                ? `/api/admin/products/${encodeURIComponent(id)}`
                 : "/api/admin/products",
             {
                 method: id ? "PUT" : "POST",
@@ -369,36 +708,56 @@ $("productForm").addEventListener("submit", async event => {
         );
 
         closeProductForm();
+
         await loadAll();
 
-        toast(id ? "Displey yangilandi!" : "Yangi displey qo‘shildi!");
+        toast(
+            id
+                ? "Displey yangilandi!"
+                : "Yangi displey qo‘shildi!"
+        );
 
     } catch (error) {
         $("formError").textContent = error.message;
+
     } finally {
-        button.disabled = false;
-        button.textContent = id
-            ? "O‘zgarishlarni saqlash"
-            : "Mahsulotni saqlash";
+        if (button) {
+            button.disabled = false;
+            button.textContent = id
+                ? "O‘zgarishlarni saqlash"
+                : "Mahsulotni saqlash";
+        }
     }
 });
 
-// O‘CHIRISH
+/* =========================================
+   DELETE PRODUCT
+========================================= */
+
 async function deleteProduct(id) {
-    const product = adminProducts.find(p => String(p.id) === String(id));
+    const product = adminProducts.find(
+        p => String(p.id) === String(id)
+    );
 
-    if (!product) return;
-
-    if (!confirm(`"${product.name}" displeyini o‘chirmoqchimisiz?`)) {
+    if (!product) {
+        toast("Mahsulot topilmadi.");
         return;
     }
 
+    const confirmed = confirm(
+        `"${product.name}" displeyini o‘chirmoqchimisiz?`
+    );
+
+    if (!confirmed) return;
+
     try {
-        await api(`/api/admin/products/${id}`, {
-            method: "DELETE"
-        });
+        await api(
+            `/api/admin/products/${encodeURIComponent(id)}`,
+            { method: "DELETE" }
+        );
 
         await loadAll();
+
         toast("Displey o‘chirildi!");
 
     } catch (error) {
@@ -406,12 +765,19 @@ async function deleteProduct(id) {
     }
 }
 
-// BUYURTMALAR
+/* =========================================
+   ORDERS
+========================================= */
+
 async function loadOrders() {
     try {
-        adminOrders = await api("/api/admin/orders");
+        const data = await api("/api/admin/orders");
+
+        adminOrders = getArray(data, "orders");
+
         renderOrders();
         renderDashboard();
+
     } catch (error) {
         toast(error.message);
     }
@@ -419,6 +785,8 @@ async function loadOrders() {
 
 function renderOrders() {
     const container = $("adminOrders");
+
+    if (!container) return;
 
     if (!adminOrders.length) {
         container.innerHTML =
@@ -434,70 +802,145 @@ function renderOrders() {
         "Bekor qilindi"
     ];
 
-    container.innerHTML = adminOrders.map(order => `
-        <div class="order-card">
+    container.innerHTML = adminOrders.map(order => {
+        const id = String(order.id ?? "");
+        const items = Array.isArray(order.items)
+            ? order.items
+            : [];
 
-            <div class="order-top">
-                <h3>Buyurtma #${escapeHTML(order.id)}</h3>
-                <strong>${money(order.total)}</strong>
-            </div>
+        return `
+            <div class="order-card">
 
-            <p>👤 ${escapeHTML(order.customerName)}</p>
-            <p>📞 ${escapeHTML(order.phone)}</p>
-            <p>🆔 Telegram ID: ${escapeHTML(order.userId)}</p>
+                <div class="order-top">
+                    <h3>
+                        Buyurtma #${escapeHTML(id)}
+                    </h3>
 
-            <p>📅 ${escapeHTML(
-                new Date(order.createdAt).toLocaleString("uz-UZ")
-            )}</p>
+                    <strong>${money(order.total)}</strong>
+                </div>
 
-            <p><b>Mahsulotlar:</b></p>
+                <p>👤 ${escapeHTML(order.customerName || "Noma'lum")}</p>
 
-            ${order.items.map(item => `
-                <p>
-                    ${escapeHTML(item.name)}
-                    (${escapeHTML(item.type)})
-                    — ${item.qty} dona
+                <p>📞 ${escapeHTML(order.phone || "Kiritilmagan")}</p>
+
+                <p>🆔 Telegram ID:
+                    ${escapeHTML(order.userId || "Mavjud emas")}
                 </p>
-            `).join("")}
 
-            <p>📝 ${escapeHTML(order.note || "Izoh yo‘q")}</p>
+                <p>📅 ${escapeHTML(formatDate(order.createdAt))}</p>
 
-            <label>Buyurtma holati:</label>
+                <p><b>Mahsulotlar:</b></p>
 
-            <select
-                onchange="changeOrderStatus('${escapeHTML(order.id)}', this.value)"
-            >
-                ${statuses.map(status => `
-                    <option
-                        value="${status}"
-                        ${order.status === status ? "selected" : ""}
-                    >
-                        ${status}
-                    </option>
+                ${items.map(item => `
+                    <p>
+                        ${escapeHTML(item.name || "Mahsulot")}
+                        (${escapeHTML(item.type || "")})
+                        — ${Math.max(0, safeNumber(item.qty))} dona
+                    </p>
                 `).join("")}
-            </select>
 
-        </div>
-    `).join("");
+                <p>📝 ${escapeHTML(order.note || "Izoh yo‘q")}</p>
+
+                <label>Buyurtma holati:</label>
+
+                <select
+                    data-order-status
+                    data-id="${escapeHTML(id)}"
+                >
+                    ${statuses.map(status => `
+                        <option
+                            value="${escapeHTML(status)}"
+                            ${order.status === status ? "selected" : ""}
+                        >
+                            ${escapeHTML(status)}
+                        </option>
+                    `).join("")}
+                </select>
+
+            </div>
+        `;
+    }).join("");
 }
 
-// BUYURTMA HOLATINI O‘ZGARTIRISH
-async function changeOrderStatus(id, status) {
+/* =========================================
+   CHANGE ORDER STATUS
+========================================= */
+
+$("adminOrders")?.addEventListener("change", async event => {
+    const select = event.target.closest("[data-order-status]");
+
+    if (!select) return;
+
+    const id = select.dataset.id;
+    const status = select.value;
+
+    select.disabled = true;
+
     try {
-        await api(`/api/admin/orders/${encodeURIComponent(id)}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status })
-        });
+        await api(
+            `/api/admin/orders/${encodeURIComponent(id)}`,
+            {
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ status })
+            }
+        );
 
         await loadOrders();
+
         toast("Buyurtma holati yangilandi!");
 
     } catch (error) {
         toast(error.message);
         await loadOrders();
+
+    } finally {
+        select.disabled = false;
     }
+});
+
+/* =========================================
+   MODAL CLOSE
+========================================= */
+
+$("productModal")?.addEventListener("click", event => {
+    if (event.target.id === "productModal") {
+        closeProductForm();
+    }
+});
+
+/* =========================================
+   REFRESH
+========================================= */
+
+async function refreshAdmin() {
+    await loadAll();
 }
 
-// BOSHLASH
-checkAdmin();
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !$("adminApp")?.classList.contains("hidden")) {
+        loadAll();
+    }
+});
+
+/* =========================================
+   GLOBAL FUNCTIONS
+   HTML onclick ishlatadigan funksiyalar
+========================================= */
+
+window.showPage = showPage;
+window.openProductForm = openProductForm;
+window.closeProductForm = closeProductForm;
+window.editProduct = editProduct;
+window.deleteProduct = deleteProduct;
+window.loadAll = loadAll;
+window.loadOrders = loadOrders;
+window.refreshAdmin = refreshAdmin;
+
+/* =========================================
+   START
+========================================= */
+
+document.addEventListener("DOMContentLoaded", checkAdmin);

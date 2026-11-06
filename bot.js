@@ -232,8 +232,10 @@ function adminOnly(req, res, next) {
 app.post("/api/admin/login", (req, res) => {
     const password = req.body?.password;
 
-    if (typeof password !== "string" ||
-        !safeEqual(password, ADMIN_PASSWORD)) {
+    if (
+        typeof password !== "string" ||
+        !safeEqual(password, ADMIN_PASSWORD)
+    ) {
         return res.status(401).json({
             success: false,
             message: "Parol noto'g'ri!"
@@ -242,6 +244,8 @@ app.post("/api/admin/login", (req, res) => {
 
     req.session.regenerate(error => {
         if (error) {
+            console.error("SESSION REGENERATE ERROR:", error);
+
             return res.status(500).json({
                 success: false,
                 message: "Sessiya yaratilmadi."
@@ -250,13 +254,23 @@ app.post("/api/admin/login", (req, res) => {
 
         req.session.isAdmin = true;
 
-        res.json({
-            success: true,
-            message: "Xush kelibsiz!"
+        req.session.save(error => {
+            if (error) {
+                console.error("SESSION SAVE ERROR:", error);
+
+                return res.status(500).json({
+                    success: false,
+                    message: "Sessiya saqlanmadi."
+                });
+            }
+
+            return res.json({
+                success: true,
+                message: "Xush kelibsiz!"
+            });
         });
     });
 });
-
 // ADMIN HOLATI
 app.get("/api/admin/me", adminOnly, (req, res) => {
     res.json({ success: true });

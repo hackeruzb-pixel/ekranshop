@@ -34,7 +34,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
     font: inherit;
 }
 
@@ -59,6 +60,32 @@ img {
     min-height: 100vh;
     margin: auto;
     padding: 18px 16px calc(125px + env(safe-area-inset-bottom));
+}
+
+/* =========================
+   ADMIN ELEMENTS
+========================= */
+
+/* Oddiy foydalanuvchiga admin elementlari ko‘rinmaydi */
+body:not(.is-admin) .admin-only {
+    display: none !important;
+}
+
+/* Admin uchun savatcha elementlari */
+body.is-admin .cart-header.admin-only {
+    display: block !important;
+}
+
+body.is-admin .cart-bar.admin-only {
+    display: flex !important;
+}
+
+body.is-admin .bottom-nav .admin-only {
+    display: flex !important;
+}
+
+body.is-admin .modal.admin-only.show {
+    display: flex !important;
 }
 
 /* =========================
@@ -305,6 +332,7 @@ img {
 ========================= */
 
 .section-title,
+.section-heading,
 .products-heading {
     display: flex;
     justify-content: space-between;
@@ -312,9 +340,16 @@ img {
 }
 
 .section-title h3,
+.section-heading h3,
 .products-heading h3 {
     font-size: 15px;
     font-weight: 800;
+}
+
+.section-heading p {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 5px;
 }
 
 .section-title > span {
@@ -401,7 +436,8 @@ img {
     margin-top: 5px;
 }
 
-.heading-icon {
+.heading-icon,
+.products-icon {
     color: var(--blue);
     font-size: 24px;
 }
@@ -510,6 +546,7 @@ img {
     color: var(--red);
 }
 
+/* Savatchaga qo‘shish tugmasi faqat admin uchun */
 .add-btn {
     width: 100%;
     margin-top: 11px;
@@ -557,7 +594,6 @@ img {
     background: #17243a;
     border-radius: 15px;
     color: white;
-    display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;

@@ -30,18 +30,18 @@
         document.addEventListener("DOMContentLoaded", () => {
             const tg = window.Telegram?.WebApp;
 
-            if (tg) {
-                tg.ready();
-                tg.expand();
+            if (!tg) return;
 
-                try {
-                    if (tg.isVersionAtLeast("6.1")) {
-                        tg.setHeaderColor("#111111");
-                        tg.setBackgroundColor("#111111");
-                    }
-                } catch (error) {
-                    console.warn("Telegram sozlamasi:", error);
+            tg.ready();
+            tg.expand();
+
+            try {
+                if (tg.isVersionAtLeast("6.1")) {
+                    tg.setHeaderColor("#111111");
+                    tg.setBackgroundColor("#111111");
                 }
+            } catch (error) {
+                console.warn("Telegram sozlamasi:", error);
             }
         });
     </script>
@@ -63,8 +63,10 @@
             </div>
         </div>
 
+        <!-- Faqat admin uchun -->
         <button
-            class="cart-header"
+            class="cart-header admin-only"
+            id="cartHeaderBtn"
             type="button"
             onclick="openCart()"
             aria-label="Savatchani ochish"
@@ -92,10 +94,8 @@
 
             <p>
                 Original va sifatli kopiya displeylar.
-                Qulay narxlar va tezkor buyurtma.
+                Qulay narxlar va tezkor xizmat.
             </p>
-
-           
 
         </div>
 
@@ -134,8 +134,57 @@
     </section>
 
 
-    <!-- FILTER -->
+    <!-- CATEGORY FILTER -->
     <section class="filter-section">
+
+        <div class="section-heading">
+            <div>
+                <h3>Telefon brendi</h3>
+                <p>Kerakli telefon brendini tanlang</p>
+            </div>
+        </div>
+
+        <div class="filter-list">
+
+            <button
+                class="filter active"
+                type="button"
+                data-category="all"
+            >
+                Hammasi
+            </button>
+
+            <button
+                class="filter"
+                type="button"
+                data-category="iphone"
+            >
+                iPhone
+            </button>
+
+            <button
+                class="filter"
+                type="button"
+                data-category="samsung"
+            >
+                Samsung
+            </button>
+
+            <button
+                class="filter"
+                type="button"
+                data-category="xiaomi"
+            >
+                Xiaomi
+            </button>
+
+        </div>
+
+    </section>
+
+
+    <!-- TYPE FILTER -->
+    <section class="filter-section type-filter-section">
 
         <div class="section-heading">
             <div>
@@ -192,7 +241,6 @@
 
         </div>
 
-
         <div id="products" class="products-grid">
 
             <div class="loading">
@@ -204,8 +252,11 @@
     </main>
 
 
-    <!-- CART BAR -->
-    <div id="cartBar" class="cart-bar hidden">
+    <!-- CART BAR: FAQAT ADMIN -->
+    <div
+        id="cartBar"
+        class="cart-bar hidden admin-only"
+    >
 
         <div class="cart-bar-info">
 
@@ -229,8 +280,11 @@
     </div>
 
 
-    <!-- CART MODAL -->
-    <div class="modal" id="cartModal">
+    <!-- CART MODAL: FAQAT ADMIN -->
+    <div
+        class="modal admin-only"
+        id="cartModal"
+    >
 
         <div class="modal-content">
 
@@ -248,7 +302,6 @@
 
             </div>
 
-
             <!-- CART ITEMS -->
             <div id="cartItems">
 
@@ -257,7 +310,6 @@
                 </div>
 
             </div>
-
 
             <!-- TOTAL -->
             <div class="cart-total">
@@ -269,7 +321,6 @@
                 </strong>
 
             </div>
-
 
             <!-- CHECKOUT -->
             <button
@@ -340,8 +391,9 @@
             <small>Do‘kon</small>
         </button>
 
+        <!-- Savatcha faqat admin uchun -->
         <button
-            class="nav-item"
+            class="nav-item admin-only"
             type="button"
             onclick="openCart()"
         >
