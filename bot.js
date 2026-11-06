@@ -799,11 +799,22 @@ bot.onText(/\/start/, msg => {
 
     bot.sendMessage(
         msg.chat.id,
-        `Assalomu alaykum, ${msg.from.first_name}!
+        `👋 <b>Assalomu alaykum, ${escapeHTML(firstName)}!</b>
 
-📱 EKRAN SHOP do'koniga xush kelibsiz!
+📱 <b>EKRAN SHOP</b> rasmiy botiga xush kelibsiz!
 
-Original va kopiya displeylarni tanlang va buyurtma bering.`,
+✨ Bizda telefoningiz uchun:
+• 📲 Sifatli displeylar
+• 🔧 Telefon ehtiyot qismlari
+• 💎 Hamyonbop narxlar
+• 🚚 Qulay buyurtma berish
+
+🛍 Mahsulotlarni ko‘rish va buyurtma berish uchun quyidagi tugmani bosing.
+
+💬 Savollaringiz bo‘lsa, admin bilan bog‘lanishingiz mumkin.
+
+❤️ <b>EKRAN SHOP — sifat va ishonch!</b>
+`,
         {
             reply_markup: {
                 keyboard: keyboard,
