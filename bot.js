@@ -1,29 +1,75 @@
 
-"use strict";
+require("dotenv").config();
 
-/* =========================================
-   EKRAN SHOP — ADMIN PANEL
-   PRODUCTS + ORDERS + WAREHOUSE
-========================================= */
+const TelegramBot = require("node-telegram-bot-api");
+const express = require("express");
+const session = require("express-session");
+const multer = require("multer");
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
-let adminProducts = [];
-let adminOrders = [];
-let warehouseHistory = [];
+const { db } = require("./firebase");
 
-let warehouseStats = {
-    incoming: 0,
-    outgoing: 0,
-    stock: 0
-};
+const app = express();
 
-let isLoading = false;
-let isWarehouseLoading = false;
-let previewObjectURL = null;
+const {
+    BOT_TOKEN,
+    ADMIN_ID,
+    ADMIN_PASSWORD,
+    SESSION_SECRET,
+    WEB_APP_URL,
+    PORT = 3000
+} = process.env;
 
-const $ = id => document.getElementById(id);
+if (
+    !BOT_TOKEN ||
+    !ADMIN_ID ||
+    !ADMIN_PASSWORD ||
+    !SESSION_SECRET ||
+    !WEB_APP_URL
+) {
+    throw new Error(".env faylidagi sozlamalarni tekshiring!");
+}
 
-const money = value =>
-    Number(value || 0).toLocaleString("uz-UZ") + " so'm";
+if (!db) {
+    throw new Error("Firebase Firestore ulanmagan!");
+}
+
+// ==========================================
+// BOT
+// ==========================================
+
+const bot = new TelegramBot(BOT_TOKEN, {
+    polling: true
+});
+
+// ==========================================
+// PAPKALAR
+// ==========================================
+
+const ROOT = __dirname;
+const WEB = path.join(ROOT, "webapp");
+const UPLOADS = path.join(ROOT, "uploads");
+
+fs.mkdirSync(UPLOADS, { recursive: true });
+
+// ==========================================
+// FIRESTORE COLLECTIONS
+// ==========================================
+
+const productsCollection = db.collection("products");
+const ordersCollection = db.collection("orders");
+const warehouseCollection = db.collection("warehouse");
+const countersCollection = db.collection("system");
+
+// ==========================================
+// YORDAMCHI FUNKSIYALAR
+// ==========================================
+
+function money(value) {
+    return Number(value).toLocaleString("uz-UZ") + " so'm";
+}
 
 function escapeHTML(value) {
     return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -35,1228 +81,1337 @@ function escapeHTML(value) {
     })[char]);
 }
 
-function safeNumber(value, fallback = 0) {
+function safeEqual(a, b) {
+    const x = Buffer.from(String(a));
+    const y = Buffer.from(String(b));
+
+    return x.length === y.length &&
+        crypto.timingSafeEqual(x, y);
+}
+
+function createId() {
+    return crypto.randomUUID();
+}
+
+function validInteger(value, min = 0, max = 1000000000) {
     const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
+
+    return Number.isSafeInteger(number) &&
+        number >= min &&
+        number <= max;
 }
 
-function formatDate(value) {
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-        return "Sana mavjud emas";
+function deleteUploadedImage(image) {
+    if (!image || !image.startsWith("/uploads/")) {
+        return;
     }
 
-    return date.toLocaleString("uz-UZ");
+    const filename = path.basename(image);
+    const file = path.join(UPLOADS, filename);
+
+    if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+    }
 }
 
-/* =========================================
-   TOAST
-========================================= */
+// ==========================================
+// FIRESTORE MA'LUMOTLARINI OLISH
+// ==========================================
 
-function toast(message) {
-    let element = $("toast");
+async function getProducts() {
+    const snapshot = await productsCollection.get();
 
-    if (!element) {
-        element = document.createElement("div");
-        element.id = "toast";
-        element.className = "toast";
-        document.body.appendChild(element);
-    }
-
-    element.textContent = message;
-    element.classList.add("show");
-
-    clearTimeout(element._timer);
-
-    element._timer = setTimeout(() => {
-        element.classList.remove("show");
-    }, 2800);
+    return snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: Number(doc.data().id)
+    }));
 }
 
-/* =========================================
-   API
-========================================= */
+async function getOrders() {
+    const snapshot = await ordersCollection.get();
 
-async function api(url, options = {}) {
-    let response;
-
-    try {
-        response = await fetch(url, {
-            credentials: "same-origin",
-            cache: "no-store",
-            ...options
-        });
-    } catch (error) {
-        console.error("FETCH ERROR:", error);
-        throw new Error("Server bilan aloqa yo‘q.");
-    }
-
-    const contentType = response.headers.get("content-type") || "";
-
-    let data;
-
-    if (contentType.includes("application/json")) {
-        data = await response.json().catch(() => ({}));
-    } else {
-        data = {
-            message: await response.text().catch(() => "")
-        };
-    }
-
-    if (!response.ok) {
-        throw new Error(
-            data.message ||
-            data.error ||
-            `Server xatosi: ${response.status}`
+    return snapshot.docs
+        .map(doc => doc.data())
+        .sort((a, b) =>
+            String(b.createdAt).localeCompare(String(a.createdAt))
         );
-    }
-
-    return data;
 }
 
-/* =========================================
-   RESPONSE ARRAY
-========================================= */
+async function getWarehouseHistory() {
+    const snapshot = await warehouseCollection.get();
 
-function getArray(data, key) {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.[key])) return data[key];
-    return [];
+    return snapshot.docs
+        .map(doc => doc.data())
+        .sort((a, b) =>
+            String(b.createdAt).localeCompare(String(a.createdAt))
+        );
 }
 
-/* =========================================
-   LOGIN / ADMIN
-========================================= */
+// ==========================================
+// MAHSULOT ID RAQAMINI YARATISH
+// ==========================================
 
-function showLogin() {
-    $("loginScreen")?.classList.remove("hidden");
-    $("adminApp")?.classList.add("hidden");
+async function generateProductId() {
+    const counterRef = countersCollection.doc("counters");
+
+    return db.runTransaction(async transaction => {
+        const snapshot = await transaction.get(counterRef);
+
+        const nextId = snapshot.exists
+            ? Number(snapshot.data().productId || 0) + 1
+            : 1;
+
+        transaction.set(
+            counterRef,
+            { productId: nextId },
+            { merge: true }
+        );
+
+        return nextId;
+    });
 }
 
-function showAdmin() {
-    $("loginScreen")?.classList.add("hidden");
-    $("adminApp")?.classList.remove("hidden");
+// ==========================================
+// OMBOR TARIXIGA YOZISH
+// ==========================================
+
+function createWarehouseMovement({
+    product,
+    type,
+    quantity,
+    before,
+    after,
+    note = "",
+    source = "manual",
+    orderId = null
+}) {
+    return {
+        id: createId(),
+        productId: product.id,
+        productName: product.name,
+        type,
+        quantity,
+        before,
+        after,
+        note: String(note).slice(0, 300),
+        source,
+        orderId,
+        createdAt: new Date().toISOString()
+    };
 }
 
-async function checkAdmin() {
+// ==========================================
+// TELEGRAM WEB APP TEKSHIRUVI
+// ==========================================
+
+function verifyTelegram(initData) {
+    if (!initData) return null;
+
     try {
-        const data = await api("/api/admin/me");
+        const params = new URLSearchParams(initData);
+        const hash = params.get("hash");
 
-        if (data.isAdmin !== true) {
-            showLogin();
-            return;
+        if (!hash) return null;
+
+        params.delete("hash");
+
+        const dataCheckString = [...params.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, value]) => `${key}=${value}`)
+            .join("\n");
+
+        const secretKey = crypto
+            .createHmac("sha256", "WebAppData")
+            .update(BOT_TOKEN)
+            .digest();
+
+        const calculatedHash = crypto
+            .createHmac("sha256", secretKey)
+            .update(dataCheckString)
+            .digest("hex");
+
+        if (!safeEqual(hash, calculatedHash)) {
+            return null;
         }
 
-        showAdmin();
-        await loadAll();
+        const authDate = Number(params.get("auth_date"));
+        const now = Math.floor(Date.now() / 1000);
 
-    } catch (error) {
-        console.error("ADMIN CHECK:", error);
-        showLogin();
+        if (
+            !authDate ||
+            now - authDate > 86400 ||
+            authDate > now + 60
+        ) {
+            return null;
+        }
+
+        const user = JSON.parse(params.get("user") || "{}");
+
+        return user.id ? user : null;
+
+    } catch {
+        return null;
     }
 }
 
-/* =========================================
-   LOGIN FORM
-========================================= */
+// ==========================================
+// EXPRESS
+// ==========================================
 
-$("loginForm")?.addEventListener("submit", async event => {
-    event.preventDefault();
+app.set("trust proxy", 1);
 
-    const passwordInput = $("adminPassword");
-    const button = event.submitter ||
-        $("loginForm").querySelector('[type="submit"]');
+app.use(express.json({
+    limit: "100kb"
+}));
 
-    if (!passwordInput || !button) return;
+app.use(express.urlencoded({
+    extended: true,
+    limit: "100kb"
+}));
 
-    const password = passwordInput.value.trim();
+app.use(session({
+    name: "ekran_admin",
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
 
-    if (!password) {
-        $("loginError").textContent = "Parolni kiriting.";
-        return;
+    cookie: {
+        httpOnly: true,
+        secure: "auto",
+        sameSite: "strict",
+        maxAge: 1000 * 60 * 60 * 8
+    }
+}));
+
+app.use("/uploads", express.static(UPLOADS));
+app.use(express.static(WEB));
+
+// ==========================================
+// RASM YUKLASH
+// ==========================================
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, UPLOADS);
+    },
+
+    filename: (req, file, cb) => {
+        const ext = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp"
+        }[file.mimetype];
+
+        cb(null, createId() + ext);
+    }
+});
+
+const upload = multer({
+    storage,
+
+    limits: {
+        fileSize: 5 * 1024 * 1024,
+        files: 1
+    },
+
+    fileFilter: (req, file, cb) => {
+        const allowed = [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+        ];
+
+        if (!allowed.includes(file.mimetype)) {
+            return cb(
+                new Error("Faqat JPG, PNG yoki WEBP rasm yuklang!")
+            );
+        }
+
+        cb(null, true);
+    }
+});
+
+// ==========================================
+// ADMIN HIMOYASI
+// ==========================================
+
+function adminOnly(req, res, next) {
+    if (req.session?.isAdmin === true) {
+        return next();
     }
 
-    button.disabled = true;
-    button.textContent = "Tekshirilmoqda...";
-    $("loginError").textContent = "";
+    return res.status(401).json({
+        success: false,
+        message: "Admin tizimiga kiring."
+    });
+}
 
-    try {
-        await api("/api/admin/login", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ password })
+// ==========================================
+// ADMIN LOGIN
+// ==========================================
+
+app.post("/api/admin/login", (req, res) => {
+    const password = req.body?.password;
+
+    if (
+        typeof password !== "string" ||
+        !safeEqual(password, ADMIN_PASSWORD)
+    ) {
+        return res.status(401).json({
+            success: false,
+            message: "Parol noto'g'ri!"
         });
-
-        passwordInput.value = "";
-
-        showAdmin();
-        await loadAll();
-
-        toast("Admin panelga xush kelibsiz!");
-
-    } catch (error) {
-        $("loginError").textContent = error.message;
-
-    } finally {
-        button.disabled = false;
-        button.textContent = "Tizimga kirish →";
-    }
-});
-
-/* =========================================
-   LOGOUT
-========================================= */
-
-$("logoutBtn")?.addEventListener("click", async () => {
-    const button = $("logoutBtn");
-
-    if (button) button.disabled = true;
-
-    try {
-        await api("/api/admin/logout", {
-            method: "POST"
-        });
-
-        adminProducts = [];
-        adminOrders = [];
-        warehouseHistory = [];
-
-        showLogin();
-        toast("Tizimdan chiqildi.");
-
-    } catch (error) {
-        toast(error.message);
-
-    } finally {
-        if (button) button.disabled = false;
-    }
-});
-
-/* =========================================
-   LOAD ALL
-========================================= */
-
-async function loadAll() {
-    if (isLoading) return;
-
-    isLoading = true;
-
-    try {
-        const [productsData, ordersData] = await Promise.all([
-            api("/api/admin/products"),
-            api("/api/admin/orders")
-        ]);
-
-        adminProducts = getArray(productsData, "products");
-        adminOrders = getArray(ordersData, "orders");
-
-        renderDashboard();
-        renderAdminProducts();
-        renderOrders();
-
-        await loadWarehouse();
-
-    } catch (error) {
-        toast(error.message);
-
-    } finally {
-        isLoading = false;
-    }
-}
-
-/* =========================================
-   PAGE NAVIGATION
-========================================= */
-
-function showPage(page) {
-    const pages = [
-        "dashboard",
-        "products",
-        "orders",
-        "warehouse"
-    ];
-
-    if (!pages.includes(page)) return;
-
-    pages.forEach(name => {
-        $(name + "Page")?.classList.toggle(
-            "hidden",
-            name !== page
-        );
-    });
-
-    document.querySelectorAll(".side-link").forEach(button => {
-        button.classList.toggle(
-            "active",
-            button.dataset.page === page
-        );
-    });
-
-    const titles = {
-        dashboard: "Bosh sahifa",
-        products: "Displeylar",
-        orders: "Buyurtmalar",
-        warehouse: "Ombor"
-    };
-
-    if ($("pageTitle")) {
-        $("pageTitle").textContent = titles[page];
     }
 
-    if (page === "orders") loadOrders();
-    if (page === "products") renderAdminProducts();
-    if (page === "warehouse") loadWarehouse();
-}
-
-document.querySelectorAll(".side-link").forEach(button => {
-    button.addEventListener("click", () => {
-        showPage(button.dataset.page);
-    });
-});
-
-/* =========================================
-   DASHBOARD
-========================================= */
-
-function renderDashboard() {
-    if ($("statProducts")) {
-        $("statProducts").textContent = adminProducts.length;
-    }
-
-    const stock = adminProducts.reduce((sum, product) => {
-        return sum + Math.max(0, safeNumber(product.stock));
-    }, 0);
-
-    if ($("statStock")) {
-        $("statStock").textContent = stock;
-    }
-
-    if ($("statOrders")) {
-        $("statOrders").textContent = adminOrders.length;
-    }
-
-    const revenue = adminOrders
-        .filter(order => order.status !== "Bekor qilindi")
-        .reduce((sum, order) => {
-            return sum + safeNumber(order.total);
-        }, 0);
-
-    if ($("statRevenue")) {
-        $("statRevenue").textContent = money(revenue);
-    }
-
-    const latest = adminProducts.slice(-5).reverse();
-
-    if ($("dashboardProducts")) {
-        $("dashboardProducts").innerHTML = latest.length
-            ? latest.map(productHTML).join("")
-            : '<div class="empty">Hozircha displey yo‘q</div>';
-    }
-}
-
-/* =========================================
-   PRODUCT HTML
-========================================= */
-
-function productHTML(product) {
-    const id = escapeHTML(product.id);
-    const image = escapeHTML(product.image || "");
-    const name = escapeHTML(product.name || "Nomsiz mahsulot");
-    const brand = escapeHTML(product.brand || "");
-    const model = escapeHTML(product.model || "");
-
-    const stock = Math.max(0, safeNumber(product.stock));
-    const price = money(product.price);
-
-    return `
-        <div class="admin-product">
-
-            <img
-                src="${image}"
-                alt="${name}"
-                loading="lazy"
-                onerror="this.style.visibility='hidden'"
-            >
-
-            <div class="admin-product-info">
-                <h3>${name}</h3>
-
-                <p>
-                    ${brand} · ${model} · ${stock} dona
-                </p>
-
-                <strong>${price}</strong>
-            </div>
-
-            <div class="product-actions">
-
-                <button
-                    class="edit-btn"
-                    type="button"
-                    data-action="edit"
-                    data-id="${id}">
-                    ✎ Tahrirlash
-                </button>
-
-                <button
-                    class="delete-btn"
-                    type="button"
-                    data-action="delete"
-                    data-id="${id}">
-                    🗑 O‘chirish
-                </button>
-
-            </div>
-
-        </div>
-    `;
-}
-
-/* =========================================
-   PRODUCT LIST + BRAND FILTER
-========================================= */
-
-function renderAdminProducts() {
-    const container = $("adminProducts");
-
-    if (!container) return;
-
-    const search = ($("adminSearch")?.value || "")
-        .trim()
-        .toLowerCase();
-
-    const filter = $("adminFilter")?.value || "all";
-
-    const filtered = adminProducts.filter(product => {
-        const text = [
-            product.name,
-            product.brand,
-            product.model
-        ].join(" ").toLowerCase();
-
-        const matchesSearch = text.includes(search);
-
-        const matchesFilter =
-            filter === "all" || product.brand === filter;
-
-        return matchesSearch && matchesFilter;
-    });
-
-    container.innerHTML = filtered.length
-        ? filtered.map(productHTML).join("")
-        : '<div class="empty">Displey topilmadi</div>';
-}
-
-$("adminSearch")?.addEventListener("input", renderAdminProducts);
-$("adminFilter")?.addEventListener("change", renderAdminProducts);
-
-/* =========================================
-   PRODUCT ACTIONS
-========================================= */
-
-function handleProductAction(event) {
-    const button = event.target.closest("[data-action]");
-
-    if (!button) return;
-
-    const id = button.dataset.id;
-    const action = button.dataset.action;
-
-    if (action === "edit") editProduct(id);
-    if (action === "delete") deleteProduct(id);
-}
-
-$("adminProducts")?.addEventListener("click", handleProductAction);
-$("dashboardProducts")?.addEventListener("click", handleProductAction);
-
-/* =========================================
-   IMAGE PREVIEW
-========================================= */
-
-function clearImagePreview() {
-    if (previewObjectURL) {
-        URL.revokeObjectURL(previewObjectURL);
-        previewObjectURL = null;
-    }
-
-    const preview = $("imagePreview");
-
-    if (preview) {
-        preview.classList.add("hidden");
-        preview.removeAttribute("src");
-    }
-}
-
-$("pImage")?.addEventListener("change", () => {
-    const file = $("pImage").files?.[0];
-
-    if (!file) return;
-
-    const allowedTypes = [
-        "image/jpeg",
-        "image/png",
-        "image/webp"
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
-        $("formError").textContent =
-            "JPG, PNG yoki WEBP rasm tanlang.";
-
-        $("pImage").value = "";
-        return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-        $("formError").textContent =
-            "Rasm hajmi 5 MB dan oshmasin.";
-
-        $("pImage").value = "";
-        return;
-    }
-
-    $("formError").textContent = "";
-
-    clearImagePreview();
-
-    previewObjectURL = URL.createObjectURL(file);
-
-    $("imagePreview").src = previewObjectURL;
-    $("imagePreview").classList.remove("hidden");
-});
-
-/* =========================================
-   OPEN PRODUCT FORM
-========================================= */
-
-function openProductForm() {
-    $("productForm")?.reset();
-
-    if ($("editId")) $("editId").value = "";
-    if ($("pOldPrice")) $("pOldPrice").value = 0;
-
-    if ($("pStock")) {
-        $("pStock").value = 1;
-        $("pStock").readOnly = false;
-        $("pStock").title = "";
-    }
-
-    if ($("formTitle")) {
-        $("formTitle").textContent = "Yangi displey qo‘shish";
-    }
-
-    if ($("saveProductBtn")) {
-        $("saveProductBtn").textContent = "Mahsulotni saqlash";
-    }
-
-    clearImagePreview();
-
-    if ($("formError")) {
-        $("formError").textContent = "";
-    }
-
-    $("productModal")?.classList.add("show");
-}
-
-function closeProductForm() {
-    $("productModal")?.classList.remove("show");
-    clearImagePreview();
-}
-
-/* =========================================
-   EDIT PRODUCT
-========================================= */
-
-function editProduct(id) {
-    const product = adminProducts.find(
-        p => String(p.id) === String(id)
-    );
-
-    if (!product) {
-        alert("Mahsulot topilmadi!");
-        return;
-    }
-
-    const fields = {
-        editId: product.id,
-        pName: product.name,
-        pBrand: product.brand,
-        pModel: product.model,
-        pPrice: product.price,
-        pOldPrice: product.oldPrice || 0,
-        pStock: product.stock ?? 0,
-        pDescription: product.description || ""
-    };
-
-    Object.entries(fields).forEach(([fieldId, value]) => {
-        const element = $(fieldId);
-        if (element) element.value = value ?? "";
-    });
-
-    if ($("pStock")) {
-        $("pStock").readOnly = true;
-        $("pStock").title =
-            "Qoldiqni o‘zgartirish uchun Ombor bo‘limidan foydalaning.";
-    }
-
-    if ($("pImage")) {
-        $("pImage").value = "";
-    }
-
-    clearImagePreview();
-
-    if (product.image && $("imagePreview")) {
-        $("imagePreview").src = product.image;
-        $("imagePreview").classList.remove("hidden");
-    }
-
-    if ($("formTitle")) {
-        $("formTitle").textContent = "Displeyni tahrirlash";
-    }
-
-    if ($("saveProductBtn")) {
-        $("saveProductBtn").textContent = "O‘zgarishlarni saqlash";
-    }
-
-    if ($("formError")) {
-        $("formError").textContent = "";
-    }
-
-    $("productModal")?.classList.add("show");
-}
-
-/* =========================================
-   SAVE PRODUCT
-========================================= */
-
-$("productForm")?.addEventListener("submit", async event => {
-    event.preventDefault();
-
-    const id = $("editId")?.value || "";
-    const image = $("pImage")?.files?.[0];
-
-    const name = $("pName")?.value.trim();
-    const brand = $("pBrand")?.value.trim();
-    const model = $("pModel")?.value.trim();
-
-    const price = Number($("pPrice")?.value);
-    const oldPrice = Number($("pOldPrice")?.value || 0);
-    const stock = Number($("pStock")?.value);
-
-    if (!name || !brand || !model) {
-        $("formError").textContent =
-            "Mahsulot nomi, brendi va modelini kiriting.";
-        return;
-    }
-
-    if (!Number.isSafeInteger(price) || price <= 0) {
-        $("formError").textContent =
-            "Mahsulot narxini to‘g‘ri kiriting.";
-        return;
-    }
-
-    if (!Number.isSafeInteger(oldPrice) || oldPrice < 0) {
-        $("formError").textContent =
-            "Eski narxni to‘g‘ri kiriting.";
-        return;
-    }
-
-    if (!Number.isSafeInteger(stock) || stock < 0) {
-        $("formError").textContent =
-            "Ombordagi sonni to‘g‘ri kiriting.";
-        return;
-    }
-
-    if (!id && !image) {
-        $("formError").textContent =
-            "Yangi mahsulot uchun rasm yuklang.";
-        return;
-    }
-
-    const formData = new FormData();
-
-    formData.append("name", name);
-    formData.append("brand", brand);
-    formData.append("model", model);
-    formData.append("price", String(price));
-    formData.append("oldPrice", String(oldPrice));
-
-    // Yangi mahsulotda boshlang‘ich qoldiq yuboriladi.
-    // Tahrirlashda ombor qoldig‘i o‘zgartirilmaydi.
-    if (!id) {
-        formData.append("stock", String(stock));
-    }
-
-    formData.append(
-        "description",
-        $("pDescription")?.value.trim() || ""
-    );
-
-    if (image) {
-        formData.append("image", image);
-    }
-
-    const button = $("saveProductBtn");
-
-    if (button) {
-        button.disabled = true;
-        button.textContent = "Saqlanmoqda...";
-    }
-
-    $("formError").textContent = "";
-
-    try {
-        await api(
-            id
-                ? `/api/admin/products/${encodeURIComponent(id)}`
-                : "/api/admin/products",
-            {
-                method: id ? "PUT" : "POST",
-                body: formData
+    req.session.regenerate(error => {
+        if (error) {
+            console.error("SESSION ERROR:", error);
+
+            return res.status(500).json({
+                success: false,
+                message: "Sessiya yaratilmadi."
+            });
+        }
+
+        req.session.isAdmin = true;
+
+        req.session.save(error => {
+            if (error) {
+                console.error("SESSION SAVE ERROR:", error);
+
+                return res.status(500).json({
+                    success: false,
+                    message: "Sessiya saqlanmadi."
+                });
             }
-        );
 
-        closeProductForm();
+            res.json({
+                success: true,
+                message: "Xush kelibsiz!"
+            });
+        });
+    });
+});
 
-        await loadAll();
+app.get("/api/admin/me", (req, res) => {
+    res.json({
+        isAdmin: req.session?.isAdmin === true
+    });
+});
 
-        toast(
-            id
-                ? "Displey yangilandi!"
-                : "Yangi displey qo‘shildi!"
-        );
+app.post("/api/admin/logout", adminOnly, (req, res) => {
+    req.session.destroy(() => {
+        res.clearCookie("ekran_admin");
+
+        res.json({
+            success: true
+        });
+    });
+});
+
+// ==========================================
+// OCHIQ MAHSULOTLAR API
+// ==========================================
+
+app.get("/api/products", async (req, res) => {
+    try {
+        const products = await getProducts();
+
+        res.json(products.map(product => ({
+            ...product,
+            stock: Number(product.stock) || 0
+        })));
 
     } catch (error) {
-        $("formError").textContent = error.message;
+        console.error("PUBLIC PRODUCTS ERROR:", error);
 
-    } finally {
-        if (button) {
-            button.disabled = false;
-            button.textContent = id
-                ? "O‘zgarishlarni saqlash"
-                : "Mahsulotni saqlash";
-        }
+        res.status(500).json({
+            success: false,
+            message: "Mahsulotlarni yuklashda xatolik."
+        });
     }
 });
 
-/* =========================================
-   DELETE PRODUCT
-========================================= */
+// ==========================================
+// ADMIN MAHSULOTLARI
+// ==========================================
 
-async function deleteProduct(id) {
-    const product = adminProducts.find(
-        p => String(p.id) === String(id)
-    );
-
-    if (!product) {
-        toast("Mahsulot topilmadi.");
-        return;
-    }
-
-    const confirmed = confirm(
-        `"${product.name}" displeyini o‘chirmoqchimisiz?`
-    );
-
-    if (!confirmed) return;
-
+app.get("/api/admin/products", adminOnly, async (req, res) => {
     try {
-        await api(
-            `/api/admin/products/${encodeURIComponent(id)}`,
-            { method: "DELETE" }
-        );
-
-        await loadAll();
-
-        toast("Displey o‘chirildi!");
+        res.json(await getProducts());
 
     } catch (error) {
-        toast(error.message);
+        console.error("ADMIN PRODUCTS ERROR:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Mahsulotlarni yuklashda xatolik."
+        });
     }
-}
+});
 
-/* =========================================
-   ORDERS
-========================================= */
+// ==========================================
+// MAHSULOT QO'SHISH
+// ==========================================
+// ==========================================
+// MAHSULOT QO'SHISH
+// ==========================================
 
-async function loadOrders() {
-    try {
-        const data = await api("/api/admin/orders");
+app.post(
+    "/api/admin/products",
+    adminOnly,
+    upload.single("image"),
+    async (req, res) => {
+        try {
+            const {
+                name,
+                brand,
+                model,
+                price,
+                oldPrice,
+                stock,
+                description
+            } = req.body;
 
-        adminOrders = getArray(data, "orders");
+            const valid =
+                typeof name === "string" &&
+                name.trim().length >= 2 &&
+                name.length <= 100 &&
+                typeof brand === "string" &&
+                brand.trim().length >= 2 &&
+                typeof model === "string" &&
+                model.trim().length >= 2 &&
+                /^\d{1,12}$/.test(String(price)) &&
+                /^\d{1,12}$/.test(String(stock)) &&
+                /^\d{1,12}$/.test(String(oldPrice || 0));
 
-        renderOrders();
-        renderDashboard();
+            if (!valid) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Mahsulot ma'lumotlarini tekshiring."
+                });
+            }
 
-    } catch (error) {
-        toast(error.message);
+            if (!req.file) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Mahsulot rasmi kerak."
+                });
+            }
+
+            const priceValue = Number(price);
+            const stockValue = Number(stock);
+            const oldPriceValue = Number(oldPrice || 0);
+
+            if (
+                !Number.isSafeInteger(priceValue) ||
+                priceValue <= 0 ||
+                !Number.isSafeInteger(stockValue) ||
+                stockValue < 0 ||
+                !Number.isSafeInteger(oldPriceValue) ||
+                oldPriceValue < 0 ||
+                (description && description.length > 1000)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Narx, qoldiq yoki izoh noto'g'ri."
+                });
+            }
+
+            const id = await generateProductId();
+
+            const product = {
+                id,
+                name: name.trim(),
+                brand: brand.trim(),
+                model: model.trim(),
+                price: priceValue,
+                oldPrice: oldPriceValue,
+                stock: stockValue,
+                image: "/uploads/" + req.file.filename,
+                description: String(description || "").trim()
+            };
+
+            const productRef = productsCollection.doc(String(id));
+            const movementRef = warehouseCollection.doc(createId());
+
+            await db.runTransaction(async transaction => {
+                transaction.create(productRef, product);
+
+                if (stockValue > 0) {
+                    const movement = createWarehouseMovement({
+                        product,
+                        type: "in",
+                        quantity: stockValue,
+                        before: 0,
+                        after: stockValue,
+                        note: "Yangi mahsulotning boshlang'ich qoldig'i",
+                        source: "initial"
+                    });
+
+                    transaction.create(movementRef, movement);
+                }
+            });
+
+            res.json({
+                success: true,
+                product
+            });
+
+        } catch (error) {
+            console.error("PRODUCT ADD ERROR:", error);
+
+            if (req.file && fs.existsSync(req.file.path)) {
+                fs.unlinkSync(req.file.path);
+            }
+
+            res.status(500).json({
+                success: false,
+                message: "Mahsulot saqlanmadi."
+            });
+        }
     }
-}
+);
 
-function renderOrders() {
-    const container = $("adminOrders");
+// ==========================================
+// MAHSULOTNI TAHRIRLASH
+// ==========================================
+// ==========================================
+// MAHSULOTNI TAHRIRLASH
+// ==========================================
 
-    if (!container) return;
+app.put(
+    "/api/admin/products/:id",
+    adminOnly,
+    upload.single("image"),
+    async (req, res) => {
+        try {
+            const id = Number(req.params.id);
 
-    if (!adminOrders.length) {
-        container.innerHTML =
-            '<div class="empty">Hozircha buyurtmalar yo‘q.</div>';
-        return;
+            if (!Number.isSafeInteger(id) || id < 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Mahsulot ID noto'g'ri."
+                });
+            }
+
+            const productRef = productsCollection.doc(String(id));
+            const snapshot = await productRef.get();
+
+            if (!snapshot.exists) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Mahsulot topilmadi."
+                });
+            }
+
+            const old = snapshot.data();
+
+            const {
+                name,
+                brand,
+                model,
+                price,
+                oldPrice,
+                description
+            } = req.body;
+
+            const valid =
+                typeof name === "string" &&
+                name.trim().length >= 2 &&
+                name.length <= 100 &&
+                typeof brand === "string" &&
+                brand.trim().length >= 2 &&
+                typeof model === "string" &&
+                model.trim().length >= 2 &&
+                /^\d{1,12}$/.test(String(price)) &&
+                /^\d{1,12}$/.test(String(oldPrice || 0));
+
+            if (!valid) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Mahsulot ma'lumotlari noto'g'ri."
+                });
+            }
+
+            const priceValue = Number(price);
+            const oldPriceValue = Number(oldPrice || 0);
+
+            if (
+                !Number.isSafeInteger(priceValue) ||
+                priceValue <= 0 ||
+                !Number.isSafeInteger(oldPriceValue) ||
+                oldPriceValue < 0 ||
+                (description && description.length > 1000)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Narx yoki izohni tekshiring."
+                });
+            }
+
+            const updated = {
+                ...old,
+                name: name.trim(),
+                brand: brand.trim(),
+                model: model.trim(),
+                price: priceValue,
+                oldPrice: oldPriceValue,
+                stock: Number(old.stock) || 0,
+                description: String(description || "").trim()
+            };
+
+            // Eski mahsulotlardagi type va category
+            // maydonlarini yangilashda olib tashlaymiz.
+            delete updated.type;
+            delete updated.typeName;
+            delete updated.category;
+
+            if (req.file) {
+                updated.image = "/uploads/" + req.file.filename;
+            }
+
+            await productRef.set(updated);
+
+            if (req.file) {
+                deleteUploadedImage(old.image);
+            }
+
+            res.json({
+                success: true,
+                product: updated
+            });
+
+        } catch (error) {
+            console.error("PRODUCT EDIT ERROR:", error);
+
+            if (req.file && fs.existsSync(req.file.path)) {
+                fs.unlinkSync(req.file.path);
+            }
+
+            res.status(500).json({
+                success: false,
+                message: "Tahrirlashda xatolik."
+            });
+        }
     }
+);
 
-    const statuses = [
-        "Yangi",
-        "Jarayonda",
-        "Tayyor",
-        "Yetkazildi",
-        "Bekor qilindi"
-    ];
+// ==========================================
+// MAHSULOTNI O'CHIRISH
+// ==========================================
 
-    container.innerHTML = adminOrders.map(order => {
-        const id = String(order.id ?? "");
-        const items = Array.isArray(order.items)
-            ? order.items
-            : [];
+app.delete(
+    "/api/admin/products/:id",
+    adminOnly,
+    async (req, res) => {
+        try {
+            const id = Number(req.params.id);
+            const productRef = productsCollection.doc(String(id));
 
-        return `
-            <div class="order-card">
+            const snapshot = await productRef.get();
 
-                <div class="order-top">
-                    <h3>Buyurtma #${escapeHTML(id)}</h3>
-                    <strong>${money(order.total)}</strong>
-                </div>
+            if (!snapshot.exists) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Mahsulot topilmadi."
+                });
+            }
 
-                <p>👤 ${escapeHTML(order.customerName || "Noma'lum")}</p>
+            const product = snapshot.data();
 
-                <p>📞 ${escapeHTML(order.phone || "Kiritilmagan")}</p>
+            await productRef.delete();
 
-                <p>🆔 Telegram ID:
-                    ${escapeHTML(order.userId || "Mavjud emas")}
-                </p>
+            deleteUploadedImage(product.image);
 
-                <p>📅 ${escapeHTML(formatDate(order.createdAt))}</p>
+            res.json({
+                success: true
+            });
 
-                <p><b>Mahsulotlar:</b></p>
+        } catch (error) {
+            console.error("PRODUCT DELETE ERROR:", error);
 
-                ${items.map(item => `
-                    <p>
-                        ${escapeHTML(item.name || "Mahsulot")}
-                        — ${Math.max(0, safeNumber(item.qty))} dona
-                    </p>
-                `).join("")}
+            res.status(500).json({
+                success: false,
+                message: "Mahsulotni o'chirishda xatolik."
+            });
+        }
+    }
+);
 
-                <p>📝 ${escapeHTML(order.note || "Izoh yo‘q")}</p>
+// ==========================================
+// OMBOR: STATISTIKA VA TARIX
+// ==========================================
 
-                <label>Buyurtma holati:</label>
+app.get(
+    "/api/admin/warehouse",
+    adminOnly,
+    async (req, res) => {
+        try {
+            const products = await getProducts();
+            const history = await getWarehouseHistory();
 
-                <select
-                    data-order-status
-                    data-id="${escapeHTML(id)}"
-                >
-                    ${statuses.map(status => `
-                        <option
-                            value="${escapeHTML(status)}"
-                            ${order.status === status ? "selected" : ""}
-                        >
-                            ${escapeHTML(status)}
-                        </option>
-                    `).join("")}
-                </select>
+            const incoming = history
+                .filter(item => item.type === "in")
+                .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 
-            </div>
-        `;
-    }).join("");
-}
+            const outgoing = history
+                .filter(item => item.type === "out")
+                .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 
-/* =========================================
-   CHANGE ORDER STATUS
-========================================= */
+            const currentStock = products.reduce(
+                (sum, product) => sum + (Number(product.stock) || 0),
+                0
+            );
 
-$("adminOrders")?.addEventListener("change", async event => {
-    const select = event.target.closest("[data-order-status]");
-
-    if (!select) return;
-
-    const id = select.dataset.id;
-    const status = select.value;
-
-    select.disabled = true;
-
-    try {
-        await api(
-            `/api/admin/orders/${encodeURIComponent(id)}`,
-            {
-                method: "PATCH",
-                headers: {
-                    "Content-Type": "application/json"
+            res.json({
+                success: true,
+                stats: {
+                    incoming,
+                    outgoing,
+                    currentStock
                 },
-                body: JSON.stringify({ status })
+                history
+            });
+
+        } catch (error) {
+            console.error("WAREHOUSE GET ERROR:", error);
+
+            res.status(500).json({
+                success: false,
+                message: "Ombor ma'lumotlarini yuklashda xatolik."
+            });
+        }
+    }
+);
+
+// ==========================================
+// OMBOR: KIRIM
+// ==========================================
+
+app.post(
+    "/api/admin/warehouse/in",
+    adminOnly,
+    async (req, res) => {
+        try {
+            const productId = Number(req.body.productId);
+            const quantity = Number(req.body.quantity);
+            const note = String(req.body.note || "").trim();
+
+            if (
+                !Number.isSafeInteger(productId) ||
+                !validInteger(quantity, 1, 100000) ||
+                note.length > 300
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Kirim ma'lumotlari noto'g'ri."
+                });
             }
+
+            const productRef = productsCollection.doc(String(productId));
+            const movementRef = warehouseCollection.doc(createId());
+
+            let updatedProduct;
+
+            await db.runTransaction(async transaction => {
+                const snapshot = await transaction.get(productRef);
+
+                if (!snapshot.exists) {
+                    throw new Error("PRODUCT_NOT_FOUND");
+                }
+
+                const product = snapshot.data();
+                const before = Number(product.stock) || 0;
+                const after = before + quantity;
+
+                if (!Number.isSafeInteger(after)) {
+                    throw new Error("STOCK_TOO_LARGE");
+                }
+
+                updatedProduct = {
+                    ...product,
+                    stock: after
+                };
+
+                const movement = createWarehouseMovement({
+                    product: updatedProduct,
+                    type: "in",
+                    quantity,
+                    before,
+                    after,
+                    note: note || "Admin tomonidan kirim",
+                    source: "manual"
+                });
+
+                transaction.update(productRef, {
+                    stock: after
+                });
+
+                transaction.create(movementRef, movement);
+            });
+
+            res.json({
+                success: true,
+                message: "Kirim muvaffaqiyatli saqlandi.",
+                product: updatedProduct
+            });
+
+        } catch (error) {
+            console.error("WAREHOUSE IN ERROR:", error);
+
+            const notFound = error.message === "PRODUCT_NOT_FOUND";
+
+            res.status(notFound ? 404 : 500).json({
+                success: false,
+                message: notFound
+                    ? "Mahsulot topilmadi."
+                    : "Kirimni saqlashda xatolik."
+            });
+        }
+    }
+);
+
+// ==========================================
+// OMBOR: CHIQIM
+// ==========================================
+
+app.post(
+    "/api/admin/warehouse/out",
+    adminOnly,
+    async (req, res) => {
+        try {
+            const productId = Number(req.body.productId);
+            const quantity = Number(req.body.quantity);
+            const note = String(req.body.note || "").trim();
+
+            if (
+                !Number.isSafeInteger(productId) ||
+                !validInteger(quantity, 1, 100000) ||
+                note.length > 300
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Chiqim ma'lumotlari noto'g'ri."
+                });
+            }
+
+            const productRef = productsCollection.doc(String(productId));
+            const movementRef = warehouseCollection.doc(createId());
+
+            let updatedProduct;
+
+            await db.runTransaction(async transaction => {
+                const snapshot = await transaction.get(productRef);
+
+                if (!snapshot.exists) {
+                    throw new Error("PRODUCT_NOT_FOUND");
+                }
+
+                const product = snapshot.data();
+                const before = Number(product.stock) || 0;
+
+                if (quantity > before) {
+                    throw new Error("NOT_ENOUGH_STOCK:" + before);
+                }
+
+                const after = before - quantity;
+
+                updatedProduct = {
+                    ...product,
+                    stock: after
+                };
+
+                const movement = createWarehouseMovement({
+                    product: updatedProduct,
+                    type: "out",
+                    quantity,
+                    before,
+                    after,
+                    note: note || "Admin tomonidan chiqim",
+                    source: "manual"
+                });
+
+                transaction.update(productRef, {
+                    stock: after
+                });
+
+                transaction.create(movementRef, movement);
+            });
+
+            res.json({
+                success: true,
+                message: "Chiqim muvaffaqiyatli saqlandi.",
+                product: updatedProduct
+            });
+
+        } catch (error) {
+            console.error("WAREHOUSE OUT ERROR:", error);
+
+            if (error.message === "PRODUCT_NOT_FOUND") {
+                return res.status(404).json({
+                    success: false,
+                    message: "Mahsulot topilmadi."
+                });
+            }
+
+            if (error.message.startsWith("NOT_ENOUGH_STOCK:")) {
+                const available = error.message.split(":")[1];
+
+                return res.status(400).json({
+                    success: false,
+                    message: `Omborda faqat ${available} dona mavjud!`
+                });
+            }
+
+            res.status(500).json({
+                success: false,
+                message: "Chiqimni saqlashda xatolik."
+            });
+        }
+    }
+);
+
+// ==========================================
+// BUYURTMALAR RO'YXATI
+// ==========================================
+
+app.get(
+    "/api/admin/orders",
+    adminOnly,
+    async (req, res) => {
+        try {
+            res.json(await getOrders());
+
+        } catch (error) {
+            console.error("ORDERS GET ERROR:", error);
+
+            res.status(500).json({
+                success: false,
+                message: "Buyurtmalarni yuklashda xatolik."
+            });
+        }
+    }
+);
+
+// ==========================================
+// BUYURTMA HOLATINI O'ZGARTIRISH
+// ==========================================
+
+app.patch(
+    "/api/admin/orders/:id",
+    adminOnly,
+    async (req, res) => {
+        try {
+            const allowed = [
+                "Yangi",
+                "Jarayonda",
+                "Tayyor",
+                "Yetkazildi",
+                "Bekor qilindi"
+            ];
+
+            const status = req.body.status;
+
+            if (!allowed.includes(status)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Buyurtma holati noto'g'ri."
+                });
+            }
+
+            const orderRef = ordersCollection.doc(req.params.id);
+            const snapshot = await orderRef.get();
+
+            if (!snapshot.exists) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Buyurtma topilmadi."
+                });
+            }
+
+            await orderRef.update({ status });
+
+            res.json({
+                success: true
+            });
+
+        } catch (error) {
+            console.error("ORDER STATUS ERROR:", error);
+
+            res.status(500).json({
+                success: false,
+                message: "Buyurtma holatini o'zgartirib bo'lmadi."
+            });
+        }
+    }
+);
+
+// ==========================================
+// TELEGRAM BUYURTMA
+// ==========================================
+
+app.post("/api/orders", async (req, res) => {
+    try {
+        const user = verifyTelegram(req.body.initData);
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: "Telegram tekshiruvidan o'tmadi."
+            });
+        }
+
+        const {
+            items,
+            name,
+            phone,
+            note
+        } = req.body;
+
+        if (
+            !Array.isArray(items) ||
+            items.length === 0 ||
+            items.length > 30 ||
+            typeof name !== "string" ||
+            name.trim().length < 2 ||
+            name.length > 100 ||
+            typeof phone !== "string" ||
+            (
+                phone.trim() !== "" &&
+                !/^[+0-9()\-\s]{7,20}$/.test(phone)
+            ) ||
+            (
+                note &&
+                (
+                    typeof note !== "string" ||
+                    note.length > 500
+                )
+            )
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Buyurtma ma'lumotlari noto'g'ri."
+            });
+        }
+
+        const quantities = new Map();
+
+        for (const item of items) {
+            const id = Number(item.id);
+            const qty = Number(item.qty);
+
+            if (
+                !Number.isSafeInteger(id) ||
+                !Number.isSafeInteger(qty) ||
+                qty < 1 ||
+                qty > 20
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Mahsulot miqdori noto'g'ri."
+                });
+            }
+
+            quantities.set(
+                id,
+                (quantities.get(id) || 0) + qty
+            );
+        }
+
+        const orderId = createId().replace(/-/g, "").slice(0, 10).toUpperCase();
+        const orderRef = ordersCollection.doc(orderId);
+        const productRefs = [...quantities.keys()].map(
+            id => productsCollection.doc(String(id))
         );
 
-        await loadOrders();
+        const warehouseRefs = [...quantities.keys()].map(
+            () => warehouseCollection.doc(createId())
+        );
 
-        toast("Buyurtma holati yangilandi!");
+        let order;
+        let message;
+
+        // Barcha mahsulotlar, buyurtma va ombor tarixi
+        // bitta Firestore transaction ichida saqlanadi.
+        await db.runTransaction(async transaction => {
+            const snapshots = [];
+
+            // Avval barcha mahsulotlarni o'qiymiz.
+            for (const ref of productRefs) {
+                snapshots.push(await transaction.get(ref));
+            }
+
+            const orderItems = [];
+            const movements = [];
+            let total = 0;
+
+            for (let index = 0; index < snapshots.length; index++) {
+                const snapshot = snapshots[index];
+                const id = [...quantities.keys()][index];
+                const qty = quantities.get(id);
+
+                if (!snapshot.exists) {
+                    throw new Error("PRODUCT_NOT_FOUND");
+                }
+
+                const product = snapshot.data();
+                const before = Number(product.stock) || 0;
+
+                if (qty > before) {
+                    throw new Error(
+                        `NOT_ENOUGH_STOCK:${product.name}:${before}`
+                    );
+                }
+
+                const price = Number(product.price);
+
+                if (!Number.isSafeInteger(price) || price < 0) {
+                    throw new Error("INVALID_PRODUCT_PRICE");
+                }
+
+                const lineTotal = price * qty;
+
+                if (!Number.isSafeInteger(lineTotal)) {
+                    throw new Error("INVALID_ORDER_TOTAL");
+                }
+
+                total += lineTotal;
+
+                const after = before - qty;
+
+               orderItems.push({
+    id,
+    name: product.name,
+    brand: product.brand || "",
+    model: product.model || "",
+    price,
+    qty
+});
+
+                const updatedProduct = {
+                    ...product,
+                    stock: after
+                };
+
+                movements.push(
+                    createWarehouseMovement({
+                        product: updatedProduct,
+                        type: "out",
+                        quantity: qty,
+                        before,
+                        after,
+                        note: `Telegram buyurtmasi #${orderId}`,
+                        source: "order",
+                        orderId
+                    })
+                );
+
+                transaction.update(productRefs[index], {
+                    stock: after
+                });
+            }
+
+            if (!Number.isSafeInteger(total)) {
+                throw new Error("INVALID_ORDER_TOTAL");
+            }
+
+            order = {
+                id: orderId,
+                userId: user.id,
+                customerName: name.trim(),
+                phone: phone.trim(),
+                note: note || "",
+                items: orderItems,
+                total,
+                status: "Yangi",
+                createdAt: new Date().toISOString()
+            };
+
+            transaction.create(orderRef, order);
+
+            movements.forEach((movement, index) => {
+                transaction.create(warehouseRefs[index], movement);
+            });
+        });
+
+        // Transaction muvaffaqiyatli tugagach xabar yuboriladi.
+        message = `
+🛒 <b>YANGI BUYURTMA!</b>
+
+🆔 Buyurtma: #${orderId}
+👤 Ism: ${escapeHTML(name.trim())}
+📞 Telefon: ${escapeHTML(phone)}
+👤 Telegram: ${escapeHTML(user.first_name || "")}
+🆔 Telegram ID: <code>${user.id}</code>
+
+━━━━━━━━━━━━━━
+`;
+
+        for (const item of order.items) {
+            message += `
+📱 ${escapeHTML(item.name)}
+Brend: ${escapeHTML(item.brand)}
+Model: ${escapeHTML(item.model)}
+Soni: ${item.qty} dona
+Narxi: ${money(item.price * item.qty)}
+`;
+        }
+
+        message += `
+━━━━━━━━━━━━━━
+💰 <b>JAMI: ${money(order.total)}</b>
+📝 Izoh: ${escapeHTML(note || "Yo'q")}
+`;
+
+        // Admin xabari yuborilmasa ham buyurtma bazada saqlanadi.
+        await bot.sendMessage(ADMIN_ID, message, {
+            parse_mode: "HTML"
+        }).catch(error => {
+            console.error("ADMIN NOTIFICATION ERROR:", error.message);
+        });
+
+        await bot.sendMessage(
+            user.id,
+            `✅ Buyurtmangiz qabul qilindi!\n🆔 #${orderId}\n💰 ${money(order.total)}`
+        ).catch(() => {});
+
+        res.json({
+            success: true,
+            orderId,
+            total: order.total
+        });
 
     } catch (error) {
-        toast(error.message);
-        await loadOrders();
+        console.error("BUYURTMA XATOSI:", error);
 
-    } finally {
-        select.disabled = false;
+        if (error.message === "PRODUCT_NOT_FOUND") {
+            return res.status(404).json({
+                success: false,
+                message: "Mahsulot topilmadi."
+            });
+        }
+
+        if (error.message.startsWith("NOT_ENOUGH_STOCK:")) {
+            const parts = error.message.split(":");
+
+            return res.status(400).json({
+                success: false,
+                message: `${parts[1]} mahsulotidan faqat ${parts[2]} dona mavjud.`
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: "Buyurtmani yuborishda xatolik."
+        });
     }
 });
 
-/* =========================================
-   WAREHOUSE — LOAD DATA
-========================================= */
+// ==========================================
+// UPLOAD VA SERVER XATOLARI
+// ==========================================
 
-async function loadWarehouse() {
-    if (isWarehouseLoading) return;
-
-    isWarehouseLoading = true;
-
-    const historyContainer = $("warehouseHistory");
-
-    if (historyContainer) {
-        historyContainer.innerHTML =
-            '<div class="empty">Ombor ma’lumotlari yuklanmoqda...</div>';
-    }
-
-    try {
-        const data = await api("/api/admin/warehouse");
-
-        warehouseStats = {
-            incoming: safeNumber(data.stats?.incoming),
-            outgoing: safeNumber(data.stats?.outgoing),
-            stock: safeNumber(data.stats?.stock)
-        };
-
-        warehouseHistory = getArray(data, "history");
-
-        renderWarehouseStats();
-        renderWarehouseProducts();
-        renderWarehouseHistory();
-
-    } catch (error) {
-        if (historyContainer) {
-            historyContainer.innerHTML = `
-                <div class="empty">
-                    Ombor ma’lumotlarini yuklab bo‘lmadi:
-                    ${escapeHTML(error.message)}
-                </div>
-            `;
-        }
-
-        console.error("WAREHOUSE LOAD:", error);
-
-    } finally {
-        isWarehouseLoading = false;
-    }
-}
-
-/* =========================================
-   WAREHOUSE — STATISTICS
-========================================= */
-
-function renderWarehouseStats() {
-    const totalStock = adminProducts.reduce((sum, product) => {
-        return sum + Math.max(0, safeNumber(product.stock));
-    }, 0);
-
-    if ($("warehouseIncoming")) {
-        $("warehouseIncoming").textContent =
-            warehouseStats.incoming.toLocaleString("uz-UZ");
-    }
-
-    if ($("warehouseOutgoing")) {
-        $("warehouseOutgoing").textContent =
-            warehouseStats.outgoing.toLocaleString("uz-UZ");
-    }
-
-    if ($("warehouseStock")) {
-        $("warehouseStock").textContent =
-            totalStock.toLocaleString("uz-UZ");
-    }
-}
-
-/* =========================================
-   WAREHOUSE — PRODUCT SELECT
-========================================= */
-
-function renderWarehouseProducts() {
-    const select = $("warehouseProduct");
-
-    if (!select) return;
-
-    const selectedValue = select.value;
-
-    select.innerHTML = `
-        <option value="">Mahsulotni tanlang</option>
-
-        ${adminProducts.map(product => {
-            const id = escapeHTML(product.id);
-            const name = escapeHTML(product.name || "Nomsiz");
-            const model = escapeHTML(product.model || "");
-            const brand = escapeHTML(product.brand || "");
-
-            const stock = Math.max(0, safeNumber(product.stock));
-
-            return `
-                <option value="${id}">
-                    ${brand} ${name} — ${model} | Qoldiq: ${stock}
-                </option>
-            `;
-        }).join("")}
-    `;
-
+app.use((error, req, res, next) => {
     if (
-        selectedValue &&
-        adminProducts.some(p => String(p.id) === selectedValue)
+        error instanceof multer.MulterError ||
+        error.message?.includes("rasm")
     ) {
-        select.value = selectedValue;
-    }
-}
-
-/* =========================================
-   WAREHOUSE — HISTORY
-========================================= */
-
-function renderWarehouseHistory() {
-    const container = $("warehouseHistory");
-
-    if (!container) return;
-
-    if (!warehouseHistory.length) {
-        container.innerHTML = `
-            <div class="empty">
-                Hozircha ombor operatsiyalari mavjud emas.
-            </div>
-        `;
-        return;
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
     }
 
-    container.innerHTML = warehouseHistory.map(item => {
-        const isIncoming =
-            item.type === "in" ||
-            item.type === "incoming";
+    console.error("SERVER ERROR:", error);
 
-        const quantity = Math.max(
-            0,
-            safeNumber(item.quantity)
-        );
-
-        const productName = escapeHTML(
-            item.productName || item.name || "Mahsulot"
-        );
-
-        const note = escapeHTML(item.note || "Izoh yo‘q");
-
-        const sourceLabel =
-            item.source === "order"
-                ? "Buyurtma"
-                : "Qo‘lda";
-
-        return `
-            <div class="warehouse-history-item">
-
-                <div class="warehouse-history-info">
-                    <strong>${productName}</strong>
-
-                    <p>${escapeHTML(formatDate(item.createdAt))}</p>
-
-                    <small>${note}</small>
-
-                    <small>Manba: ${sourceLabel}</small>
-                </div>
-
-                <div class="warehouse-history-quantity"
-                     style="color:${isIncoming ? '#16a34a' : '#dc2626'}">
-
-                    ${isIncoming ? "+" : "−"}${quantity} dona
-
-                    <small>
-                        ${isIncoming ? "Kirim" : "Chiqim"}
-                    </small>
-                </div>
-
-            </div>
-        `;
-    }).join("");
-}
-
-/* =========================================
-   WAREHOUSE — IN / OUT
-========================================= */
-
-async function warehouseMove(type) {
-    const productId = $("warehouseProduct")?.value;
-    const quantity = Number($("warehouseQuantity")?.value);
-    const note = $("warehouseNote")?.value.trim() || "";
-
-    const errorElement = $("warehouseError");
-
-    if (errorElement) errorElement.textContent = "";
-
-    if (!["in", "out"].includes(type)) {
-        if (errorElement) {
-            errorElement.textContent = "Operatsiya turi noto‘g‘ri.";
-        }
-        return;
-    }
-
-    if (!productId) {
-        if (errorElement) {
-            errorElement.textContent = "Mahsulotni tanlang.";
-        }
-        return;
-    }
-
-    if (!Number.isSafeInteger(quantity) || quantity < 1) {
-        if (errorElement) {
-            errorElement.textContent =
-                "Miqdor kamida 1 dona bo‘lishi kerak.";
-        }
-        return;
-    }
-
-    const product = adminProducts.find(
-        p => String(p.id) === String(productId)
-    );
-
-    if (!product) {
-        if (errorElement) {
-            errorElement.textContent = "Mahsulot topilmadi.";
-        }
-        return;
-    }
-
-    const currentStock = Math.max(
-        0,
-        safeNumber(product.stock)
-    );
-
-    if (type === "out" && quantity > currentStock) {
-        if (errorElement) {
-            errorElement.textContent =
-                `Omborda faqat ${currentStock} dona mavjud.`;
-        }
-        return;
-    }
-
-    const operationName =
-        type === "in" ? "KIRIM" : "CHIQIM";
-
-    const confirmed = confirm(
-        `${product.name}\n\n` +
-        `Operatsiya: ${operationName}\n` +
-        `Miqdor: ${quantity} dona\n` +
-        `Hozirgi qoldiq: ${currentStock} dona\n\n` +
-        `Davom etasizmi?`
-    );
-
-    if (!confirmed) return;
-
-    const buttons = document.querySelectorAll(
-        '[onclick*="warehouseMove"]'
-    );
-
-    buttons.forEach(button => {
-        button.disabled = true;
+    res.status(500).json({
+        success: false,
+        message: "Server xatosi."
     });
-
-    try {
-        const endpoint = type === "in"
-            ? "/api/admin/warehouse/in"
-            : "/api/admin/warehouse/out";
-
-        await api(endpoint, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                productId,
-                quantity,
-                note
-            })
-        });
-
-        if ($("warehouseQuantity")) {
-            $("warehouseQuantity").value = "";
-        }
-
-        if ($("warehouseNote")) {
-            $("warehouseNote").value = "";
-        }
-
-        await loadAll();
-
-        toast(
-            type === "in"
-                ? "Mahsulot omborga qabul qilindi!"
-                : "Mahsulot ombordan chiqarildi!"
-        );
-
-    } catch (error) {
-        if (errorElement) {
-            errorElement.textContent = error.message;
-        }
-
-        toast(error.message);
-
-    } finally {
-        buttons.forEach(button => {
-            button.disabled = false;
-        });
-    }
-}
-
-/* =========================================
-   MODAL CLOSE
-========================================= */
-
-$("productModal")?.addEventListener("click", event => {
-    if (event.target.id === "productModal") {
-        closeProductForm();
-    }
 });
 
-/* =========================================
-   REFRESH
-========================================= */
+// ==========================================
+// TELEGRAM BOT
+// ==========================================
 
-async function refreshAdmin() {
-    await loadAll();
-}
+bot.onText(/\/start/, msg => {
+    const isAdmin =
+        String(msg.from.id) === String(ADMIN_ID);
 
-document.addEventListener("visibilitychange", () => {
+    const keyboard = [
+        [{
+            text: "🛍 Do'konni ochish",
+            web_app: {
+                url: WEB_APP_URL
+            }
+        }],
+        [{
+            text: "📞 Admin bilan bog'lanish"
+        }]
+    ];
+
+    if (isAdmin) {
+        keyboard.unshift([{
+            text: "🔐 Admin boshqaruv",
+            web_app: {
+                url: "https://ekranshop.onrender.com/admin.html"
+            }
+        }]);
+    }
+
+    bot.sendMessage(
+        msg.chat.id,
+        `Assalomu alaykum, ${msg.from.first_name}!
+
+📱 EKRAN SHOP do'koniga xush kelibsiz!
+
+Original va kopiya displeylarni tanlang va buyurtma bering.`,
+        {
+            reply_markup: {
+                keyboard,
+                resize_keyboard: true
+            }
+        }
+    );
+});
+
+bot.on("message", msg => {
     if (
-        !document.hidden &&
-        !$("adminApp")?.classList.contains("hidden")
+        msg.text === "📞 Admin bilan bog'lanish" &&
+        !msg.text.startsWith("/")
     ) {
-        loadAll();
+        bot.sendMessage(
+            msg.chat.id,
+            `Admin bilan bog'lanish:
+
+@premium_ekran
+@premium_ekran1`
+        );
     }
 });
 
-/* =========================================
-   GLOBAL FUNCTIONS
-========================================= */
+// ==========================================
+// SERVERNI ISHGA TUSHIRISH
+// ==========================================
 
-window.showPage = showPage;
-window.openProductForm = openProductForm;
-window.closeProductForm = closeProductForm;
-window.editProduct = editProduct;
-window.deleteProduct = deleteProduct;
-window.loadAll = loadAll;
-window.loadOrders = loadOrders;
-window.loadWarehouse = loadWarehouse;
-window.warehouseMove = warehouseMove;
-window.refreshAdmin = refreshAdmin;
+const server = app.listen(PORT, () => {
+    console.log("");
+    console.log("======================================");
+    console.log("          EKRAN SHOP SERVER");
+    console.log("======================================");
+    console.log("🟢 BOT: ISHGA TUSHDI");
+    console.log("🟢 SERVER: ISHLAMOQDA");
+    console.log("🌐 DO'KON: " + WEB_APP_URL);
+    console.log(`🔐 ADMIN: http://localhost:${PORT}/admin.html`);
+    console.log("🔥 FIRESTORE: ULANDI");
+    console.log("======================================");
+});
 
-/* =========================================
-   START
-========================================= */
+server.on("error", error => {
+    console.error("🔴 SERVER XATOSI:", error.message);
+});
 
-document.addEventListener("DOMContentLoaded", checkAdmin);
+bot.on("polling_error", error => {
+    console.error("🔴 TELEGRAM BOT XATOSI:", error.message);
+});
