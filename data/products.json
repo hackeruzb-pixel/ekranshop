@@ -1,0 +1,30 @@
+[
+  {
+    "id": 1,
+    "name": "honor400lite",
+    "brand": "Apple",
+    "model": "honor 400",
+    "type": "original",
+    "typeName": "Original",
+    "price": 120000,
+    "oldPrice": 0,
+    "stock": 17,
+    "category": "iphone",
+    "image": "/uploads/e280fda7-87fd-435a-868d-ce74f67e0c50.jpg",
+    "description": ""
+  },
+  {
+    "id": 2,
+    "name": "honor400lite",
+    "brand": "Apple",
+    "model": "honor 400",
+    "type": "copy",
+    "typeName": "Kopiya",
+    "price": 120000,
+    "oldPrice": 0,
+    "stock": 17,
+    "category": "iphone",
+    "image": "/uploads/9c612524-b49d-4c70-adba-e8b8927e160c.jpg",
+    "description": ""
+  }
+]

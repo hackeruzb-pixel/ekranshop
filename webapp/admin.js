@@ -9,6 +9,7 @@
 let adminProducts = [];
 let adminOrders = [];
 let warehouseHistory = [];
+
 let warehouseStats = {
     incoming: 0,
     outgoing: 0,
@@ -102,10 +103,6 @@ async function api(url, options = {}) {
             message: await response.text().catch(() => "")
         };
     }
-
-    console.log("API:", url);
-    console.log("STATUS:", response.status);
-    console.log("RESPONSE:", data);
 
     if (!response.ok) {
         throw new Error(
@@ -260,7 +257,6 @@ async function loadAll() {
         renderAdminProducts();
         renderOrders();
 
-        // Ombor ma'lumotlarini ham yangilash
         await loadWarehouse();
 
     } catch (error) {
@@ -286,9 +282,7 @@ function showPage(page) {
     if (!pages.includes(page)) return;
 
     pages.forEach(name => {
-        const element = $(name + "Page");
-
-        element?.classList.toggle(
+        $(name + "Page")?.classList.toggle(
             "hidden",
             name !== page
         );
@@ -312,17 +306,9 @@ function showPage(page) {
         $("pageTitle").textContent = titles[page];
     }
 
-    if (page === "orders") {
-        loadOrders();
-    }
-
-    if (page === "products") {
-        renderAdminProducts();
-    }
-
-    if (page === "warehouse") {
-        loadWarehouse();
-    }
+    if (page === "orders") loadOrders();
+    if (page === "products") renderAdminProducts();
+    if (page === "warehouse") loadWarehouse();
 }
 
 document.querySelectorAll(".side-link").forEach(button => {
@@ -379,10 +365,8 @@ function productHTML(product) {
     const id = escapeHTML(product.id);
     const image = escapeHTML(product.image || "");
     const name = escapeHTML(product.name || "Nomsiz mahsulot");
+    const brand = escapeHTML(product.brand || "");
     const model = escapeHTML(product.model || "");
-    const type = escapeHTML(
-        product.typeName || product.type || ""
-    );
 
     const stock = Math.max(0, safeNumber(product.stock));
     const price = money(product.price);
@@ -401,9 +385,7 @@ function productHTML(product) {
                 <h3>${name}</h3>
 
                 <p>
-                    ${model}
-                    · ${type}
-                    · ${stock} dona
+                    ${brand} · ${model} · ${stock} dona
                 </p>
 
                 <strong>${price}</strong>
@@ -434,7 +416,7 @@ function productHTML(product) {
 }
 
 /* =========================================
-   PRODUCT LIST + FILTER
+   PRODUCT LIST + BRAND FILTER
 ========================================= */
 
 function renderAdminProducts() {
@@ -452,15 +434,13 @@ function renderAdminProducts() {
         const text = [
             product.name,
             product.brand,
-            product.model,
-            product.type,
-            product.typeName
+            product.model
         ].join(" ").toLowerCase();
 
         const matchesSearch = text.includes(search);
 
         const matchesFilter =
-            filter === "all" || product.type === filter;
+            filter === "all" || product.brand === filter;
 
         return matchesSearch && matchesFilter;
     });
@@ -485,13 +465,8 @@ function handleProductAction(event) {
     const id = button.dataset.id;
     const action = button.dataset.action;
 
-    if (action === "edit") {
-        editProduct(id);
-    }
-
-    if (action === "delete") {
-        deleteProduct(id);
-    }
+    if (action === "edit") editProduct(id);
+    if (action === "delete") deleteProduct(id);
 }
 
 $("adminProducts")?.addEventListener("click", handleProductAction);
@@ -561,13 +536,11 @@ function openProductForm() {
 
     if ($("editId")) $("editId").value = "";
     if ($("pOldPrice")) $("pOldPrice").value = 0;
+
     if ($("pStock")) {
         $("pStock").value = 1;
         $("pStock").readOnly = false;
-    }
-
-    if ($("pType")) {
-        $("pType").value = "original";
+        $("pStock").title = "";
     }
 
     if ($("formTitle")) {
@@ -611,25 +584,21 @@ function editProduct(id) {
         pName: product.name,
         pBrand: product.brand,
         pModel: product.model,
-        pCategory: product.category || "iphone",
         pPrice: product.price,
         pOldPrice: product.oldPrice || 0,
         pStock: product.stock ?? 0,
-        pDescription: product.description || "",
-        pType: product.type || "original"
+        pDescription: product.description || ""
     };
 
-    Object.entries(fields).forEach(([id, value]) => {
-        const element = $(id);
+    Object.entries(fields).forEach(([fieldId, value]) => {
+        const element = $(fieldId);
         if (element) element.value = value ?? "";
     });
 
-    // Tahrirlashda qoldiqni bevosita o'zgartirish taqiqlanadi.
-    // Qoldiq faqat ombor kirim/chiqim amali bilan o'zgaradi.
     if ($("pStock")) {
         $("pStock").readOnly = true;
         $("pStock").title =
-            "Qoldiqni o'zgartirish uchun Ombor bo'limidan foydalaning.";
+            "Qoldiqni o‘zgartirish uchun Ombor bo‘limidan foydalaning.";
     }
 
     if ($("pImage")) {
@@ -676,24 +645,9 @@ $("productForm")?.addEventListener("submit", async event => {
     const oldPrice = Number($("pOldPrice")?.value || 0);
     const stock = Number($("pStock")?.value);
 
-    const type = $("pType")?.value || "original";
-    const category = $("pCategory")?.value || "iphone";
-
     if (!name || !brand || !model) {
         $("formError").textContent =
             "Mahsulot nomi, brendi va modelini kiriting.";
-        return;
-    }
-
-    if (!["original", "copy"].includes(type)) {
-        $("formError").textContent =
-            "Mahsulot turini tanlang.";
-        return;
-    }
-
-    if (!["iphone", "samsung", "xiaomi"].includes(category)) {
-        $("formError").textContent =
-            "Mahsulot kategoriyasini tanlang.";
         return;
     }
 
@@ -711,7 +665,7 @@ $("productForm")?.addEventListener("submit", async event => {
 
     if (!Number.isSafeInteger(stock) || stock < 0) {
         $("formError").textContent =
-            "Ombordagi son 0 yoki undan katta butun son bo‘lishi kerak.";
+            "Ombordagi sonni to‘g‘ri kiriting.";
         return;
     }
 
@@ -723,14 +677,17 @@ $("productForm")?.addEventListener("submit", async event => {
 
     const formData = new FormData();
 
-    formData.append("category", category);
     formData.append("name", name);
     formData.append("brand", brand);
     formData.append("model", model);
-    formData.append("type", type);
     formData.append("price", String(price));
     formData.append("oldPrice", String(oldPrice));
-    formData.append("stock", String(stock));
+
+    // Yangi mahsulotda boshlang‘ich qoldiq yuboriladi.
+    // Tahrirlashda ombor qoldig‘i o‘zgartirilmaydi.
+    if (!id) {
+        formData.append("stock", String(stock));
+    }
 
     formData.append(
         "description",
@@ -866,10 +823,7 @@ function renderOrders() {
             <div class="order-card">
 
                 <div class="order-top">
-                    <h3>
-                        Buyurtma #${escapeHTML(id)}
-                    </h3>
-
+                    <h3>Buyurtma #${escapeHTML(id)}</h3>
                     <strong>${money(order.total)}</strong>
                 </div>
 
@@ -888,7 +842,6 @@ function renderOrders() {
                 ${items.map(item => `
                     <p>
                         ${escapeHTML(item.name || "Mahsulot")}
-                        (${escapeHTML(item.type || "")})
                         — ${Math.max(0, safeNumber(item.qty))} dona
                     </p>
                 `).join("")}
@@ -959,31 +912,6 @@ $("adminOrders")?.addEventListener("change", async event => {
    WAREHOUSE — LOAD DATA
 ========================================= */
 
-/*
-   Kutilayotgan backend javobi:
-
-   {
-       success: true,
-       stats: {
-           incoming: 10,
-           outgoing: 4,
-           stock: 23
-       },
-       history: [
-           {
-               id: "...",
-               productId: 1,
-               productName: "...",
-               type: "in",
-               quantity: 10,
-               note: "...",
-               source: "manual",
-               createdAt: "..."
-           }
-       ]
-   }
-*/
-
 async function loadWarehouse() {
     if (isWarehouseLoading) return;
 
@@ -1048,7 +976,6 @@ function renderWarehouseStats() {
     }
 
     if ($("warehouseStock")) {
-        // Joriy qoldiq products.json asosida hisoblanadi.
         $("warehouseStock").textContent =
             totalStock.toLocaleString("uz-UZ");
     }
@@ -1072,15 +999,13 @@ function renderWarehouseProducts() {
             const id = escapeHTML(product.id);
             const name = escapeHTML(product.name || "Nomsiz");
             const model = escapeHTML(product.model || "");
-            const type = escapeHTML(
-                product.typeName || product.type || ""
-            );
+            const brand = escapeHTML(product.brand || "");
 
             const stock = Math.max(0, safeNumber(product.stock));
 
             return `
                 <option value="${id}">
-                    ${name} — ${model} (${type}) | Qoldiq: ${stock}
+                    ${brand} ${name} — ${model} | Qoldiq: ${stock}
                 </option>
             `;
         }).join("")}
@@ -1137,17 +1062,13 @@ function renderWarehouseHistory() {
             <div class="warehouse-history-item">
 
                 <div class="warehouse-history-info">
-
                     <strong>${productName}</strong>
 
-                    <p>
-                        ${escapeHTML(formatDate(item.createdAt))}
-                    </p>
+                    <p>${escapeHTML(formatDate(item.createdAt))}</p>
 
                     <small>${note}</small>
 
                     <small>Manba: ${sourceLabel}</small>
-
                 </div>
 
                 <div class="warehouse-history-quantity"
@@ -1158,7 +1079,6 @@ function renderWarehouseHistory() {
                     <small>
                         ${isIncoming ? "Kirim" : "Chiqim"}
                     </small>
-
                 </div>
 
             </div>
@@ -1177,9 +1097,7 @@ async function warehouseMove(type) {
 
     const errorElement = $("warehouseError");
 
-    if (errorElement) {
-        errorElement.textContent = "";
-    }
+    if (errorElement) errorElement.textContent = "";
 
     if (!["in", "out"].includes(type)) {
         if (errorElement) {
@@ -1259,7 +1177,7 @@ async function warehouseMove(type) {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                productId: Number(productId),
+                productId,
                 quantity,
                 note
             })
